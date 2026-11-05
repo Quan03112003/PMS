@@ -11,7 +11,15 @@ using System.Data;
 var builder = WebApplication.CreateBuilder(args);
 var connection = builder.Configuration.GetConnectionString("PmsDb")
     ?? throw new InvalidOperationException("Missing ConnectionStrings:PmsDb");
-builder.Services.AddDbContext<PmsDbContext>(o => o.UseSqlServer(connection));
+var databaseProvider = builder.Configuration["Database:Provider"] ?? "SqlServer";
+builder.Services.AddDbContext<PmsDbContext>(options => {
+    if (string.Equals(databaseProvider, "PostgreSQL", StringComparison.OrdinalIgnoreCase))
+        options.UseNpgsql(connection);
+    else if (string.Equals(databaseProvider, "SqlServer", StringComparison.OrdinalIgnoreCase))
+        options.UseSqlServer(connection);
+    else
+        throw new InvalidOperationException($"Unsupported Database:Provider '{databaseProvider}'");
+});
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -35,6 +43,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 if (app.Environment.IsDevelopment()) {
     app.UseSwagger(); app.UseSwaggerUI();
+}
+if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Database:InitializeForDemo")) {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<PmsDbContext>();
     await db.Database.EnsureCreatedAsync();

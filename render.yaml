@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: lotus-pms-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/HotelPms.Api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:10000
+      - key: Database__Provider
+        value: PostgreSQL
+      - key: Database__InitializeForDemo
+        value: "true"
+      - key: ConnectionStrings__PmsDb
+        sync: false
+      - key: Jwt__Secret
+        generateValue: true
+      - key: Jwt__Issuer
+        value: HotelPms.Api
+      - key: Jwt__Audience
+        value: HotelPms.Angular

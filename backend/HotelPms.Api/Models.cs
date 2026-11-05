@@ -205,7 +205,7 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<ReservationOccupant>().ToTable("reservation_occupants").HasIndex(x => x.ReservationId);
         b.Entity<ServiceItem>().ToTable("services").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<FolioCharge>().ToTable("folio_charges");
-        b.Entity<Payment>().ToTable("payments").HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("[idempotency_key] IS NOT NULL");
+        b.Entity<Payment>().ToTable("payments").HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("\"idempotency_key\" IS NOT NULL");
         b.Entity<CashShift>().ToTable("cash_shifts");
         b.Entity<Agency>().ToTable("agencies").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<AuditEvent>().ToTable("audit_events");
