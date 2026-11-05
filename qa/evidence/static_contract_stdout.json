@@ -1,0 +1,82 @@
+[
+  {
+    "id": "SRC-01",
+    "title": "SRC-01 Payment has immutable UUID idempotency key",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-02",
+    "title": "SRC-02 Unique filtered SQL index for payment request",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-03",
+    "title": "SRC-03 Payment lock before sum and insert",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-04",
+    "title": "SRC-04 Refund writes negative signed ledger entry",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-05",
+    "title": "SRC-05 Cancel checks outstanding deposits",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-06",
+    "title": "SRC-06 Restore checks overlapping confirmed reservations",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-07",
+    "title": "SRC-07 Restore checks out-of-order room",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-08",
+    "title": "SRC-08 Reversed debt can be reused for new checkout",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-09",
+    "title": "SRC-09 One actual occupant list per booking",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-10",
+    "title": "SRC-10 Occupant migration preserves existing DB",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-11",
+    "title": "SRC-11 Room is locked before booking conflict check",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-12",
+    "title": "SRC-12 Inventory lock used in sales and stock adjustments",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-13",
+    "title": "SRC-13 Angular creates UUIDs for payment requests",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-14",
+    "title": "SRC-14 Angular group payments carry UUIDs",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-15",
+    "title": "SRC-15 E2E script includes two-request races",
+    "status": "PASS"
+  },
+  {
+    "id": "SRC-16",
+    "title": "SRC-16 No direct claim that offline preview tests API",
+    "status": "PASS"
+  }
+]

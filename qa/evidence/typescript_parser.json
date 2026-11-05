@@ -1,0 +1,20 @@
+{
+  "checkType": "SYNTAX_ONLY_NOT_ANGULAR_BUILD",
+  "files": [
+    {
+      "file": "advanced.component.ts",
+      "status": "PASS",
+      "diagnostics": []
+    },
+    {
+      "file": "api.service.ts",
+      "status": "PASS",
+      "diagnostics": []
+    },
+    {
+      "file": "app.component.ts",
+      "status": "PASS",
+      "diagnostics": []
+    }
+  ]
+}

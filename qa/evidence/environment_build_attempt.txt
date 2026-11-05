@@ -1,0 +1,14 @@
+UTC:
+2026-11-05T07:49:30+00:00
+dotnet:
+bash: line 1: dotnet: command not found
+docker:
+bash: line 1: docker: command not found
+sqlcmd:
+node/npm:
+v22.16.0
+10.9.2
+npm offline dry-run:
+npm error code ENOTCACHED
+npm error request to https://registry.npmjs.org/@angular-devkit%2fbuild-angular failed: cache mode is 'only-if-cached' but no cached response is available.
+npm error A complete log of this run can be found in: /home/oai/.npm/_logs/2026-11-05T07_49_30_908Z-debug-0.log

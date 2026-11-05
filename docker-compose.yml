@@ -1,0 +1,16 @@
+name: hotel-chain-pms
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: hotel-chain-pms-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-YourStrong!Passw0rd}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "14333:1433"
+    volumes:
+      - pms_sql_data:/var/opt/mssql
+    restart: unless-stopped
+volumes:
+  pms_sql_data:

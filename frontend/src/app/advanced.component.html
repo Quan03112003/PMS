@@ -1,0 +1,127 @@
+<div class="adv">
+  <div class="adv-header">
+    <div><div class="adv-eyebrow">LOTUS PMS V2 · {{ view === 'chain' ? 'TOÀN CHUỖI' : 'CƠ SỞ #' + propertyId }}</div><h1>{{ titles[view] }}</h1><p>Chức năng kết nối C# API và SQL Server · dữ liệu được kiểm tra tại backend</p></div>
+    <button class="adv-btn soft" (click)="load()">↻ Tải lại</button>
+  </div>
+  @if (error) { <div class="adv-message error">{{ error }}</div> }
+  @if (success) { <div class="adv-message ok">{{ success }}</div> }
+
+  @if (view === 'waitlist') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Thêm khách vào hàng đợi</h2><div class="adv-form">
+      <label>Họ tên khách <input [(ngModel)]="form.guestName" placeholder="Nguyễn Văn A"></label>
+      <label>Số điện thoại <input [(ngModel)]="form.phone"></label>
+      <label>Ngày nhận <input type="date" [(ngModel)]="form.checkInDate"></label>
+      <label>Ngày trả <input type="date" [(ngModel)]="form.checkOutDate"></label>
+      <label>Hạng phòng mong muốn <select [(ngModel)]="form.roomTypeId"><option [ngValue]="null">Bất kỳ</option>@for (r of buildings; track r.id) {<option [ngValue]="r.id">{{ r.name }}</option>}</select></label>
+      <label>Yêu cầu <textarea [(ngModel)]="form.note" rows="2"></textarea></label>
+      <button class="adv-btn primary" (click)="createWaitlist()" [disabled]="submitting">Ghi hàng đợi</button>
+    </div></section><section class="adv-panel wide"><h2>Danh sách hàng đợi</h2><div class="adv-scroll"><table><thead><tr><th>Khách</th><th>Ngày đến / đi</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
+      @for (x of items; track x.id) {<tr><td><b>{{ x.guestName }}</b><small>{{ x.phone }}</small></td><td>{{ x.checkInDate }} → {{ x.checkOutDate }}</td><td><span class="adv-tag">{{ x.status }}</span></td><td>@if (x.status === 'WAITING') {<button class="adv-btn tiny" (click)="selectQueue(x)">Gán phòng</button> <button class="adv-btn tiny soft" (click)="submit('/waitlist/' + x.id + '/cancel', {})">Hủy</button>}</td></tr>}
+    </tbody></table></div>@if (selectedWaitlistId) {<div class="adv-inline"><select [(ngModel)]="selectedRoomId"><option [ngValue]="0">-- Phòng còn trống --</option>@for (r of queueRooms; track r.id) {<option [ngValue]="r.id">Phòng {{ r.number }} · {{ currency(r.baseRate) }}</option>}</select><button class="adv-btn primary" (click)="assignWaitlist()" [disabled]="!selectedRoomId">Xác nhận gán</button></div>}</section></div>
+  }
+
+  @if (view === 'groups') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Đặt phòng khách đoàn</h2><div class="adv-form">
+      <label>Đại diện đoàn <input [(ngModel)]="form.guestName" placeholder="Đại diện đoàn"></label>
+      <label>Điện thoại <input [(ngModel)]="form.phone"></label>
+      <label>Nhận phòng <input type="date" [(ngModel)]="form.checkInDate" (change)="searchRooms()"></label>
+      <label>Trả phòng <input type="date" [(ngModel)]="form.checkOutDate" (change)="searchRooms()"></label>
+      <label>Ghi chú <textarea [(ngModel)]="form.note" rows="2"></textarea></label>
+      <div class="adv-field"><b>Phòng khả dụng · chọn tối thiểu 2</b><div class="adv-room-picks">@for (r of groupRooms; track r.id) {<label><input type="checkbox" [checked]="selectedRooms.includes(r.id)" (change)="toggleRoom(r.id)"> {{ r.number }} <small>{{ r.roomTypeName }}</small></label>}</div></div>
+      <button class="adv-btn primary" (click)="createGroup()" [disabled]="submitting || selectedRooms.length < 2">Tạo đoàn ({{ selectedRooms.length }} phòng)</button>
+    </div></section><section class="adv-panel wide"><h2>Quản lý đoàn / thanh toán hộ</h2><div class="adv-scroll"><table><thead><tr><th>Mã đoàn</th><th>Phòng</th><th>Chờ nhận</th><th>Đang ở</th><th>Đã trả</th><th>Chọn</th></tr></thead><tbody>@for (x of items; track x.groupCode) {<tr><td><b>{{ x.groupCode }}</b></td><td>{{ x.rooms }}</td><td>{{ x.confirmed }}</td><td>{{ x.inHouse }}</td><td>{{ x.checkedOut }}</td><td><button class="adv-btn tiny" (click)="selectGroup(x.groupCode)">Thao tác</button></td></tr>}</tbody></table></div>
+      @if (selectedGroup) {<div class="adv-actionbox"><b>Đoàn {{ selectedGroup }}</b><div class="adv-inline"><button class="adv-btn" (click)="groupAction('check-in')">Nhận phòng đoàn</button><button class="adv-btn soft" (click)="groupAction('checkout')">Trả phòng đoàn</button></div><div class="adv-inline"><input type="number" [(ngModel)]="groupAmount" placeholder="Số tiền thanh toán hộ"><select [(ngModel)]="groupMethod"><option value="TRANSFER">Chuyển khoản</option><option value="CASH">Tiền mặt</option><option value="CARD">Thẻ</option></select><button class="adv-btn primary" (click)="groupAction('pay')">Phân bổ thanh toán</button></div><small>Tiền được phân bổ theo thứ tự booking, tối đa đến số dư từng phòng. Tiền mặt cần mở ca trước.</small>
+        <h3>Người lưu trú thực tế theo từng phòng</h3><div class="adv-scroll"><table><thead><tr><th>Phòng</th><th>Booking ID</th><th>Danh sách khách ở</th></tr></thead><tbody>
+          @for (g of groupRoomOccupants; track g.id) {<tr><td>{{g.roomNumber}}</td><td>{{g.id}}</td><td>@for(p of g.occupants; track p.id){<div>{{p.fullName}} · {{p.phone}} · {{p.isPrimary ? 'Khách chính' : 'Khách cùng phòng'}}</div>}@empty{<small>Chưa đăng ký người ở thực tế</small>}</td></tr>}
+        </tbody></table></div>
+        <div class="adv-form columns"><label>Phòng đoàn<select [(ngModel)]="selectedGroupReservation"><option [ngValue]="0">Chọn booking/phòng</option>@for(g of groupRoomOccupants; track g.id){<option [ngValue]="g.id">{{g.roomNumber}} (Booking {{g.id}})</option>}</select></label>
+        <label>Họ tên người ở <input [(ngModel)]="occupantForm.fullName"></label><label>Điện thoại <input [(ngModel)]="occupantForm.phone"></label>
+        <label>Quốc tịch <input [(ngModel)]="occupantForm.nationality"></label><label>4 ký tự cuối giấy tờ <input maxlength="4" [(ngModel)]="occupantForm.identityLast4"></label>
+        <label><input type="checkbox" [(ngModel)]="occupantForm.isPrimary"> Khách chính</label>
+        </div><button class="adv-btn primary" (click)="addOccupant()" [disabled]="!selectedGroupReservation || !occupantForm.fullName || submitting">Lưu người lưu trú vào phòng</button>
+        </div>}
+    </section></div>
+  }
+
+  @if (view === 'transfers') {
+    <section class="adv-panel"><h2>Chuyển một phần / toàn bộ dịch vụ sang phòng khác</h2><div class="adv-form columns">
+      <label>Phòng nguồn <select [ngModel]="selectedStay" (ngModelChange)="selectStay($event)"><option [ngValue]="0">-- Chọn phòng đang ở --</option>@for (s of stays; track s.id) {<option [ngValue]="s.id">{{ s.roomNumber }} · {{ s.fullName }}</option>}</select></label>
+      <label>Dịch vụ cần chuyển <select [(ngModel)]="selectedCharge"><option [ngValue]="0">-- Chọn dịch vụ --</option>@for (c of folio?.charges || []; track c.id) { @if(c.category === 'SERVICE') {<option [ngValue]="c.id">{{ c.description }} · số lượng {{ c.quantity }} · {{ currency(c.amount) }}</option>} }</select></label>
+      <label>Phòng đích <select [(ngModel)]="targetStay"><option [ngValue]="0">-- Chọn phòng --</option>@for (s of stays; track s.id) { @if(s.id !== selectedStay) {<option [ngValue]="s.id">{{ s.roomNumber }} · {{ s.fullName }}</option>} }</select></label>
+      <label>Số lượng <input type="number" min="1" [(ngModel)]="transferQty"></label>
+    </div><button class="adv-btn primary" [disabled]="!selectedCharge || !targetStay || submitting" (click)="transferCharge()">Chuyển khoản dịch vụ</button><p class="adv-note">Không chuyển khoản tiền phòng hoặc khoản dịch vụ đã được thanh toán vượt số dư nguồn. Tồn kho không thay đổi khi chuyển charge.</p></section>
+  }
+
+  @if (view === 'rates') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Thêm bảng giá</h2><div class="adv-form">
+      <label>Mã giá <input [(ngModel)]="form.code" placeholder="GIO-2H"></label><label>Tên gói <input [(ngModel)]="form.name" placeholder="Giá giờ 2 tiếng"></label>
+      <label>Hình thức <select [(ngModel)]="form.mode"><option value="HOURLY">Nghỉ giờ</option><option value="DAY_USE">Nghỉ ngày</option><option value="OVERNIGHT">Qua đêm</option></select></label>
+      <label>Giá cơ bản (VND) <input type="number" min="0" [(ngModel)]="form.basePrice"></label>
+      <label>Số giờ bao gồm <input type="number" min="1" [(ngModel)]="form.includedHours"></label>
+      <label>Phụ thu mỗi giờ (VND) <input type="number" min="0" [(ngModel)]="form.extraHourPrice"></label>
+      <button class="adv-btn primary" (click)="createRate()" [disabled]="!canManage">Thêm gói giá</button>
+    </div></section><section class="adv-panel wide"><h2>Danh sách bảng giá</h2><div class="adv-scroll"><table><thead><tr><th>Mã</th><th>Tên gói</th><th>Loại</th><th>Giá</th><th>Giờ</th><th>Phụ thu giờ</th></tr></thead><tbody>@for(x of items; track x.id) {<tr><td>{{x.code}}</td><td><b>{{x.name}}</b></td><td>{{x.mode}}</td><td>{{currency(x.basePrice)}}</td><td>{{x.includedHours}}</td><td>{{currency(x.extraHourPrice)}}</td></tr>}</tbody></table></div><p class="adv-note">V2 lưu cấu hình giá; tính phụ thu dựa trên giờ thực tế chưa tự động hóa. Giá đặt phòng vẫn cần xác nhận tại màn hình booking.</p></section></div>
+  }
+
+  @if (view === 'buildings') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Thêm tòa nhà</h2><div class="adv-form"><label>Mã tòa <input [(ngModel)]="form.code" placeholder="TOWER-A"></label><label>Tên tòa nhà <input [(ngModel)]="form.name" placeholder="Tòa A"></label><button class="adv-btn primary" [disabled]="!canManage" (click)="createBuilding()">Lưu tòa nhà</button></div><h2>Các tòa nhà</h2>@for (x of items; track x.id) {<div class="adv-pill">{{ x.code }} · {{ x.name }}</div>}</section>
+    <section class="adv-panel wide"><h2>Gán phòng vào tòa nhà</h2><div class="adv-scroll"><table><thead><tr><th>Phòng</th><th>Tầng</th><th>Hạng</th><th>Tòa nhà</th></tr></thead><tbody>@for (r of rooms; track r.id) {<tr><td><b>{{ r.number }}</b></td><td>{{ r.floor }}</td><td>{{r.roomTypeName}}</td><td><select [ngModel]="r.buildingId" (ngModelChange)="assignBuilding(r.id, $event)" [disabled]="!canManage"><option [ngValue]="null">Chưa gán</option>@for (b of items; track b.id) {<option [ngValue]="b.id">{{b.name}}</option>}</select></td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'suppliers') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Nhà cung cấp mới</h2><div class="adv-form"><label>Mã NCC <input [(ngModel)]="form.code"></label><label>Tên nhà cung cấp <input [(ngModel)]="form.name"></label><label>Điện thoại <input [(ngModel)]="form.phone"></label><label>Địa chỉ <input [(ngModel)]="form.address"></label><button class="adv-btn primary" [disabled]="!canManage" (click)="createSupplier()">Thêm nhà cung cấp</button></div></section>
+    <section class="adv-panel wide"><h2>Danh mục nhà cung cấp</h2><div class="adv-scroll"><table><thead><tr><th>Mã</th><th>Tên</th><th>Điện thoại</th><th>Địa chỉ</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td>{{x.code}}</td><td><b>{{x.name}}</b></td><td>{{x.phone}}</td><td>{{x.address}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'stockledger') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Phiếu nhập / xuất / điều chỉnh</h2><div class="adv-form">
+      <label>Hàng hóa <select [(ngModel)]="form.serviceItemId"><option [ngValue]="undefined">-- Chọn --</option>@for(s of services;track s.id){@if(s.trackInventory){<option [ngValue]="s.id">{{s.name}} · tồn {{s.stockQuantity}}</option>}}</select></label>
+      <label>Loại nghiệp vụ <select [(ngModel)]="form.type"><option value="IN">Nhập kho</option><option value="OUT">Xuất kho</option><option value="RETURN">Hoàn nhập</option><option value="ADJUST">Điều chỉnh (+/-)</option></select></label>
+      <label>Số lượng @if(form.type !== 'ADJUST'){(nhập số dương)} <input type="number" [(ngModel)]="form.quantityChange"></label>
+      <label>Đơn giá vốn (VND) <input type="number" min="0" [(ngModel)]="form.unitCost"></label>
+      <label>Nhà cung cấp <select [(ngModel)]="form.supplierId"><option [ngValue]="null">-- Không có --</option>@for(s of suppliers;track s.id){<option [ngValue]="s.id">{{s.name}}</option>}</select></label>
+      <label>Số chứng từ / ghi chú <input [(ngModel)]="form.reference"></label>
+      <button class="adv-btn primary" [disabled]="!canManage" (click)="createStockMove()">Ghi giao dịch tồn kho</button>
+    </div></section><section class="adv-panel wide"><h2>Thẻ kho · lịch sử giao dịch</h2><div class="adv-scroll"><table><thead><tr><th>Thời gian</th><th>Hàng hóa</th><th>Loại</th><th>Thay đổi</th><th>Tồn sau</th><th>Chứng từ</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td>{{x.createdAtUtc | date:'dd/MM HH:mm'}}</td><td><b>{{x.serviceName}}</b></td><td>{{x.type}}</td><td [class.negative]="x.quantityChange < 0">{{x.quantityChange}}</td><td>{{x.balanceAfter}}</td><td>{{x.reference || '—'}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'retail') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Bán dịch vụ ngoài phòng</h2><div class="adv-form"><label>Hàng hóa <select [(ngModel)]="form.serviceItemId"><option [ngValue]="undefined">-- Chọn --</option>@for (s of services; track s.id){<option [ngValue]="s.id">{{s.name}} · {{currency(s.price)}}</option>}</select></label><label>Số lượng <input type="number" min="1" [(ngModel)]="form.quantity"></label><label>Thanh toán <select [(ngModel)]="form.paymentMethod"><option value="TRANSFER">Chuyển khoản</option><option value="CASH">Tiền mặt</option><option value="CARD">Thẻ</option></select></label><button class="adv-btn primary" (click)="createRetailSale()">Bán hàng · trừ kho</button></div><p class="adv-note">Thanh toán tiền mặt cần có ca thu ngân đang mở.</p></section><section class="adv-panel wide"><h2>Lịch sử bán lẻ</h2><div class="adv-scroll"><table><thead><tr><th>#</th><th>Mã hàng</th><th>SL</th><th>Thành tiền</th><th>Thu bằng</th><th>Thời gian</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td>{{x.id}}</td><td>{{x.serviceItemId}}</td><td>{{x.quantity}}</td><td><b>{{currency(x.totalAmount)}}</b></td><td>{{x.paymentMethod}}</td><td>{{x.soldAtUtc | date:'dd/MM HH:mm'}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'vouchers') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Lập phiếu thu / chi</h2><div class="adv-form"><label>Loại phiếu <select [(ngModel)]="form.type"><option value="RECEIPT">Phiếu thu khác</option><option value="EXPENSE">Phiếu chi</option></select></label><label>Hình thức <select [(ngModel)]="form.method"><option value="TRANSFER">Chuyển khoản</option><option value="CASH">Tiền mặt</option><option value="CARD">Thẻ</option></select></label><label>Hạng mục <input [(ngModel)]="form.category" placeholder="Điện nước / mua vật tư"></label><label>Số tiền VND <input type="number" min="1" [(ngModel)]="form.amount"></label><label>Diễn giải <textarea rows="2" [(ngModel)]="form.description"></textarea></label><button class="adv-btn primary" [disabled]="!canManage" (click)="createVoucher()">Ghi sổ phiếu</button></div></section><section class="adv-panel wide"><h2>Danh sách chứng từ</h2><div class="adv-scroll"><table><thead><tr><th>Mã phiếu</th><th>Ngày</th><th>Loại</th><th>Hạng mục</th><th>Số tiền</th><th>Phương thức</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.code}}</b></td><td>{{x.createdAtUtc | date:'dd/MM HH:mm'}}</td><td>{{x.type}}</td><td>{{x.category}}</td><td>{{currency(x.amount)}}</td><td>{{x.method}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'debts') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Thu nợ / trả phòng ghi nợ</h2><div class="adv-form"><label>Số tiền thu công nợ <input type="number" min="1" [(ngModel)]="form.amount"></label><label>Hình thức thu <select [(ngModel)]="form.method"><option value="TRANSFER">Chuyển khoản</option><option value="CASH">Tiền mặt</option><option value="CARD">Thẻ</option></select></label><label>Ghi chú nợ <textarea rows="2" [(ngModel)]="form.note"></textarea></label></div><h3>Khách đang ở – checkout ghi nợ</h3><div class="adv-scroll"><table><thead><tr><th>Phòng</th><th>Khách</th><th>Còn thiếu</th><th></th></tr></thead><tbody>@for(s of stays;track s.id){<tr><td>{{s.roomNumber}}</td><td>{{s.fullName}}</td><td>{{currency(s.charges-s.payments)}}</td><td>@if(s.charges > s.payments){<button class="adv-btn tiny" (click)="debtCheckout(s.id)">Trả phòng ghi nợ</button>}</td></tr>}</tbody></table></div></section>
+    <section class="adv-panel wide"><h2>Chi tiết công nợ</h2><div class="adv-scroll"><table><thead><tr><th>Khách</th><th>Booking</th><th>Nợ gốc</th><th>Còn thiếu</th><th>Trạng thái</th><th></th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.fullName}}</b><small>{{x.phone}}</small></td><td>{{x.code}}</td><td>{{currency(x.originalAmount)}}</td><td><b>{{currency(x.outstandingAmount)}}</b></td><td>{{x.status}}</td><td>@if(x.status === 'OPEN'){<button class="adv-btn tiny" (click)="collectDebt(x.id)">Thu số tiền nhập</button>}</td></tr>}</tbody></table></div><h3>Khôi phục phòng đã checkout trong ngày</h3><div class="adv-scroll"><table><thead><tr><th>Phòng</th><th>Khách</th><th>Checkout</th><th></th></tr></thead><tbody>@for(x of bookings;track x.id){<tr><td>{{x.roomNumber}}</td><td>{{x.fullName}}</td><td>{{x.checkedOutAtUtc | date:'dd/MM HH:mm'}}</td><td>@if(canManage){<button class="adv-btn tiny soft" (click)="restoreStay(x.id)">Khôi phục (kiểm điều kiện)</button>}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'assets') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Nhận giữ tài sản của khách</h2><div class="adv-form"><label>Phòng đang ở <select [(ngModel)]="form.stayId"><option [ngValue]="undefined">-- Chọn --</option>@for(s of stays;track s.id){<option [ngValue]="s.id">{{s.roomNumber}} · {{s.fullName}}</option>}</select></label><label>Tài sản <input [(ngModel)]="form.description" placeholder="Vali / giấy tờ / đồ vật..."></label><label>Số lượng <input type="number" min="1" [(ngModel)]="form.quantity"></label><label>Ghi chú <textarea [(ngModel)]="form.note"></textarea></label><button class="adv-btn primary" (click)="createAsset()">Nhận tài sản</button></div></section><section class="adv-panel wide"><h2>Danh sách tài sản</h2><div class="adv-scroll"><table><thead><tr><th>Stay ID</th><th>Tài sản</th><th>SL</th><th>Nhận lúc</th><th>Trạng thái</th><th></th></tr></thead><tbody>@for(x of items;track x.id){<tr><td>#{{x.stayId}}</td><td><b>{{x.description}}</b></td><td>{{x.quantity}}</td><td>{{x.receivedAtUtc | date:'dd/MM HH:mm'}}</td><td>{{x.returnedAtUtc ? 'Đã trả' : 'Đang giữ'}}</td><td>@if(!x.returnedAtUtc){<button class="adv-btn tiny" (click)="submit('/guest-assets/' + x.id + '/return', {})">Xác nhận trả</button>}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'dayclose') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Snapshot tổng hợp ngày</h2><div class="adv-form"><label>Ngày ghi nhận (UTC) <input type="date" [(ngModel)]="form.businessDate"></label><button class="adv-btn primary" [disabled]="!canManage" (click)="createClose()">Tạo snapshot</button></div><p class="adv-note">Không phải khóa sổ night audit: không thay đổi các charge, không ngăn chỉnh sửa giao dịch sau snapshot. Mỗi ngày chỉ tạo một bản.</p></section><section class="adv-panel wide"><h2>Lịch sử snapshot</h2><div class="adv-scroll"><table><thead><tr><th>Ngày</th><th>Tiền phòng ghi nhận</th><th>Dịch vụ ghi nhận</th><th>Tiền đã thu</th><th>Người chốt</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.businessDate}}</b></td><td>{{currency(x.roomCharges)}}</td><td>{{currency(x.serviceCharges)}}</td><td>{{currency(x.receivedAmount)}}</td><td>User #{{x.actorUserId}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'chain') {
+    <section class="adv-panel"><div class="adv-inline"><label>Từ ngày <input type="date" [(ngModel)]="from"></label><label>Đến ngày <input type="date" [(ngModel)]="to"></label><button class="adv-btn primary" (click)="loadReport()">Xem báo cáo</button><button class="adv-btn soft" [disabled]="!report" (click)="exportChain()">Xuất Excel (CSV)</button><button class="adv-btn soft" (click)="printPdf()">In / Lưu PDF</button></div></section>
+    @if(report){<div class="adv-kpis"><div><span>Tiền phòng ghi nhận</span><strong>{{currency(reportTotals.roomRevenue)}}</strong></div><div><span>Dịch vụ phòng</span><strong>{{currency(reportTotals.serviceRevenue)}}</strong></div><div><span>Bán lẻ</span><strong>{{currency(reportTotals.retailRevenue)}}</strong></div><div><span>Tổng tiền folio đã thu</span><strong>{{currency(reportTotals.folioPayments)}}</strong></div><div><span>Công nợ đang mở</span><strong>{{currency(reportTotals.outstandingDebt)}}</strong></div></div><section class="adv-panel"><h2>Từng cơ sở thuộc phạm vi tài khoản</h2><div class="adv-scroll"><table><thead><tr><th>Khách sạn</th><th>Phòng kinh doanh</th><th>Đang ở</th><th>Công suất ước tính</th><th>Tiền phòng</th><th>Dịch vụ</th><th>Bán lẻ</th><th>Đã thu</th><th>Nợ hiện tại</th></tr></thead><tbody>@for(p of report.properties;track p.propertyId){<tr><td><b>{{p.propertyName}}</b><small>{{p.propertyCode}}</small></td><td>{{p.rooms}}</td><td>{{p.inHouse}}</td><td>{{p.approxOccupancyPercent}}%</td><td>{{currency(p.roomRevenue)}}</td><td>{{currency(p.serviceRevenue)}}</td><td>{{currency(p.retailRevenue)}}</td><td>{{currency(p.folioPayments)}}</td><td>{{currency(p.outstandingDebt)}}</td></tr>}</tbody></table></div><p class="adv-note">{{report.note}}</p></section>}
+  }
+
+  @if (view === 'agencyReports') {
+    <section class="adv-panel"><div class="adv-inline"><label>Từ ngày <input type="date" [(ngModel)]="from"></label><label>Đến ngày <input type="date" [(ngModel)]="to"></label><button class="adv-btn primary" (click)="loadAgencyReport()">Tra cứu</button></div></section>
+    @if(agencyReport){<section class="adv-panel"><h2>Doanh thu & hoa hồng dự kiến</h2><div class="adv-scroll"><table><thead><tr><th>Mã đại lý</th><th>Tên</th><th>Đơn đặt</th><th>Tiền phòng ghi sổ</th><th>Tỷ lệ</th><th>Hoa hồng ước tính</th></tr></thead><tbody>@for(x of agencyReport.agencies;track x.id){<tr><td>{{x.code}}</td><td><b>{{x.name}}</b></td><td>{{x.bookingCount}}</td><td>{{currency(x.roomChargeRevenue)}}</td><td>{{x.commissionPercent}}%</td><td>{{currency(x.estimatedCommission)}}</td></tr>}</tbody></table></div><p class="adv-note">{{agencyReport.note}}</p></section>}
+  }
+
+  @if (view === 'shiftReconcile') {
+    <section class="adv-panel"><h2>Chọn ca thu ngân để đối soát</h2><div class="adv-inline"><select [(ngModel)]="selectedShift"><option [ngValue]="0">-- Ca thu ngân --</option>@for(s of items;track s.id){<option [ngValue]="s.id">Ca #{{s.id}} · User {{s.userId}} · {{s.status}}</option>}</select><button class="adv-btn primary" (click)="loadReconcile()" [disabled]="!selectedShift">Đối soát</button></div><p class="adv-note">Đối soát tiền mặt thu qua folio, bán hàng lẻ và phiếu thu/chi. Không bao gồm thanh toán thẻ/chuyển khoản.</p></section>
+    @if(reconcile){<div class="adv-kpis"><div><span>Đầu ca</span><strong>{{currency(reconcile.openingAmount)}}</strong></div><div><span>Thu tiền phòng</span><strong>{{currency(reconcile.roomCash)}}</strong></div><div><span>Bán lẻ</span><strong>{{currency(reconcile.retailCash)}}</strong></div><div><span>Quỹ kỳ vọng</span><strong>{{currency(reconcile.expectedClosing)}}</strong></div><div><span>Chênh lệch sau đóng</span><strong>{{reconcile.variance === null ? 'Chưa đóng ca' : currency(reconcile.variance)}}</strong></div></div><section class="adv-panel"><p><b>Phiếu thu khác:</b> {{currency(reconcile.otherCashReceipt)}} · <b>Phiếu chi:</b> {{currency(reconcile.cashExpense)}} · <b>Thực nhận cuối ca:</b> {{reconcile.actualClosing === null ? 'Chưa nhập' : currency(reconcile.actualClosing)}}</p></section>}
+  }
+
+  @if (view === 'registration') {
+    <section class="adv-panel"><h2>Xuất danh sách khách lưu trú</h2><div class="adv-inline"><label>Từ ngày nhận <input type="date" [(ngModel)]="from"></label><label>Đến ngày nhận <input type="date" [(ngModel)]="to"></label><button class="adv-btn primary" (click)="exportRegistration()">Xuất danh sách CSV</button></div><p class="adv-note">Đây là danh sách tham khảo cho lễ tân, chưa phải mẫu khai báo tạm trú/chứng từ được cơ quan có thẩm quyền chấp nhận.</p></section><section class="adv-panel"><h2>Đơn đặt phòng gần đây</h2><div class="adv-scroll"><table><thead><tr><th>Mã</th><th>Khách</th><th>Phòng</th><th>Ngày đến</th><th>Ngày đi</th><th>Trạng thái</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.code}}</b></td><td>{{x.fullName}}</td><td>{{x.roomNumber}}</td><td>{{x.checkInDate}}</td><td>{{x.checkOutDate}}</td><td>{{x.status}}</td></tr>}</tbody></table></div></section>
+  }
+</div>

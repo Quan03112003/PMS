@@ -1,0 +1,224 @@
+@if (!user) {
+  <div class="auth-layout">
+    <div class="auth-visual">
+      <div class="auth-brand"><span class="mark">✳</span><span>LOTUS<span class="brand-light">PMS</span></span></div>
+      <div class="auth-copy">
+        <div class="eyebrow light">HOTEL MANAGEMENT, REIMAGINED</div>
+        <h1>Mọi trải nghiệm lưu trú,<br><em>trong một nền tảng.</em></h1>
+        <p>Quản lý chuỗi khách sạn thông minh, thao tác lễ tân trực quan, dữ liệu vận hành theo thời gian thực.</p>
+        <div class="auth-stats"><div><strong>02</strong><span>Cơ sở mẫu</span></div><div><strong>28</strong><span>Phòng mẫu</span></div><div><strong>24/7</strong><span>Vận hành</span></div></div>
+      </div>
+      <div class="auth-footer">LOTUS PMS · PHIÊN BẢN DEMO · 2026</div>
+    </div>
+    <div class="auth-form-pane">
+      <div class="auth-form">
+        <div class="pill-label">QUẢN TRỊ KHÁCH SẠN</div>
+        <h2>Chào mừng trở lại</h2>
+        <p class="muted">Đăng nhập để tiếp tục quản lý hoạt động khách sạn.</p>
+        <form (ngSubmit)="login()">
+          <label>Email đăng nhập</label><input type="email" name="email" [(ngModel)]="loginEmail" required placeholder="ten@khachsan.vn">
+          <label>Mật khẩu</label><input type="password" name="password" [(ngModel)]="loginPassword" required placeholder="Nhập mật khẩu">
+          <button class="btn btn-primary full large" type="submit" [disabled]="loginBusy">{{ loginBusy ? 'Đang đăng nhập…' : 'Đăng nhập →' }}</button>
+        </form>
+        <div class="demo-hint"><span>ⓘ</span><div><b>Tài khoản demo</b><br>Quản trị: admin&#64;pms.local<br>Lễ tân: reception&#64;pms.local<br>Mật khẩu: <b>Demo&#64;12345</b></div></div>
+      </div>
+    </div>
+  </div>
+} @else {
+<div class="shell">
+  <aside class="sidebar" [class.open]="sidebarOpen">
+    <div class="brand"><span class="mark">✳</span><div>LOTUS<span class="brand-light">PMS</span><small>HOTEL OPERATIONS</small></div></div>
+    <div class="property-mini"><div class="property-symbol">✦</div><div><span class="mini-label">HỆ THỐNG CHUỖI</span><strong>Lotus Hospitality</strong></div><span class="chevron">⌄</span></div>
+    <nav class="nav">
+      @for (group of menuGroups; track group.title) {
+        <div class="nav-group"><div class="nav-heading">{{ group.title }}</div>
+          @for (item of group.items; track item.id) {
+            @if (!['audit', 'users'].includes(item.id) || isManager) {
+             @if (item.id !== 'properties' || user.role === 'CHAIN_ADMIN') {
+              <button class="nav-item" type="button" [class.active]="view === item.id" (click)="setView(item.id)"><span class="nav-icon">{{ item.icon }}</span><span>{{ item.label }}</span>@if (view === item.id) {<b class="nav-current"></b>}</button>
+            }
+            }
+          }
+        </div>
+      }
+    </nav>
+    <div class="sidebar-foot"><div class="support-icon">?</div><div><b>Trợ giúp hệ thống</b><small>Demo & tài liệu hướng dẫn</small></div></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar">
+      <div class="top-left"><button class="mobile-menu" (click)="sidebarOpen = !sidebarOpen" aria-label="Mở menu">☰</button><span class="breadcrumb">Lotus PMS <span>/</span> {{ title() }}</span></div>
+      <div class="top-actions">
+        <span class="live-dot">● <span>Hệ thống demo</span></span>
+        <select class="property-select" [(ngModel)]="propertyId" (ngModelChange)="changeProperty()">
+          @for (p of properties; track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+        </select>
+        <button class="avatar" title="Đăng xuất" (click)="logout()">{{ (user.fullName || 'U').substring(0, 1) }}</button>
+      </div>
+    </header>
+    <main class="content">
+      @if (view === 'dashboard') {
+        <div class="page-heading"><div><div class="eyebrow">TỔNG QUAN VẬN HÀNH</div><h1>Xin chào, {{ user.fullName }} <span class="wave">✳</span></h1><p>Tình hình hoạt động tại <b>{{ currentProperty?.name }}</b> · {{ today | date:'dd/MM/yyyy' }}</p></div><button class="btn btn-primary" (click)="openModal('booking')">＋ Tạo đặt phòng</button></div>
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-icon mint">▦</span><div class="kpi-title">Tổng phòng kinh doanh</div><strong>{{ dashboard.rooms || 0 }}</strong><small>Phòng đang hoạt động</small></div>
+          <div class="kpi-card"><span class="kpi-icon blue">◈</span><div class="kpi-title">Phòng đang có khách</div><strong>{{ dashboard.inHouse || 0 }}</strong><small><span class="positive">{{ dashboard.occupancy || 0 }}%</span> công suất hiện tại</small></div>
+          <div class="kpi-card"><span class="kpi-icon amber">↳</span><div class="kpi-title">Khách đến hôm nay</div><strong>{{ dashboard.arrivals || 0 }}</strong><small>Chờ làm thủ tục check-in</small></div>
+          <div class="kpi-card"><span class="kpi-icon rose">↗</span><div class="kpi-title">Khách đi hôm nay</div><strong>{{ dashboard.departures || 0 }}</strong><small>Dự kiến trả phòng</small></div>
+        </div>
+        <div class="two-col">
+          <section class="panel"><div class="panel-head"><div><h2>Tình trạng phòng</h2><p>Theo dữ liệu lưu trú và buồng phòng</p></div><button class="text-btn" (click)="setView('roommap')">Xem sơ đồ →</button></div>
+            <div class="status-summary"><div class="status-line"><span class="legend-dot green"></span><span>Phòng trống</span><b>{{ dashboard.available || 0 }}</b></div><div class="bar-track"><div class="bar-fill green-bg" [style.width.%]="dashboard.rooms ? dashboard.available / dashboard.rooms * 100 : 0"></div></div>
+              <div class="status-line"><span class="legend-dot blue-dot"></span><span>Đang ở</span><b>{{ dashboard.inHouse || 0 }}</b></div><div class="bar-track"><div class="bar-fill blue-bg" [style.width.%]="dashboard.occupancy || 0"></div></div>
+              <div class="status-line"><span class="legend-dot orange"></span><span>Cần dọn phòng</span><b>{{ dashboard.dirty || 0 }}</b></div><div class="bar-track"><div class="bar-fill orange-bg" [style.width.%]="dashboard.rooms ? dashboard.dirty / dashboard.rooms * 100 : 0"></div></div></div>
+            <div class="panel-foot"><span>Doanh thu ghi folio (demo)</span><strong>{{ (dashboard.charges || 0) | number:'1.0-0' }} ₫</strong></div>
+          </section>
+          <section class="panel"><div class="panel-head"><div><h2>Thao tác nhanh</h2><p>Truy cập các nghiệp vụ thường dùng</p></div></div><div class="quick-grid">
+            <button (click)="openModal('booking')"><span class="quick-icon q1">＋</span><b>Đặt phòng</b><small>Tạo đặt phòng mới</small></button>
+            <button (click)="setView('roommap')"><span class="quick-icon q2">▦</span><b>Sơ đồ phòng</b><small>Xem tình trạng phòng</small></button>
+            <button (click)="setView('stays')"><span class="quick-icon q3">♙</span><b>Khách lưu trú</b><small>Quản lý folio</small></button>
+            <button (click)="setView('housekeeping')"><span class="quick-icon q4">✧</span><b>Buồng phòng</b><small>Cập nhật vệ sinh</small></button>
+          </div></section>
+        </div>
+        <section class="panel table-panel"><div class="panel-head"><div><h2>Đặt phòng gần đây</h2><p>Các giao dịch mới nhất tại cơ sở</p></div><button class="text-btn" (click)="setView('bookings')">Tất cả đặt phòng →</button></div>
+          <div class="table-scroll"><table><thead><tr><th>MÃ ĐẶT PHÒNG</th><th>KHÁCH HÀNG</th><th>PHÒNG</th><th>NGÀY NHẬN</th><th>TRẠNG THÁI</th></tr></thead><tbody>
+            @for (b of dashboard.recent || []; track b.id) { <tr><td><b>{{ b.code }}</b></td><td>{{ b.fullName }}</td><td>{{ b.roomNumber }}</td><td>{{ b.checkInDate | date:'dd/MM/yyyy' }}</td><td><span class="badge" [ngClass]="badge(b.status)">{{ statusText(b.status) }}</span></td></tr> }
+            @if (!(dashboard.recent || []).length) { <tr><td colspan="5" class="empty">Chưa có đặt phòng.</td></tr> }
+          </tbody></table></div>
+        </section>
+      }
+      @if (view === 'roommap') {
+        <div class="page-heading"><div><div class="eyebrow">FRONT DESK / ROOM RACK</div><h1>Sơ đồ phòng</h1><p>Theo dõi tình trạng, nhấn vào phòng để thao tác ngay</p></div><button class="btn btn-primary" (click)="openModal('booking')">＋ Đặt phòng</button></div>
+        <section class="panel padded"><div class="toolbar"><div class="filter-pills"><button [class.chosen]="floor === 0" (click)="floor = 0">Tất cả tầng</button>@for (f of floors; track f) {<button [class.chosen]="floor === f" (click)="floor = f">Tầng {{ f }}</button>}</div><input class="search" placeholder="⌕  Tìm số phòng, khách..." [(ngModel)]="filter"></div>
+          <div class="legend"><span><i class="legend-dot green"></i> Trống sẵn sàng</span><span><i class="legend-dot blue-dot"></i> Có khách</span><span><i class="legend-dot orange"></i> Chưa dọn</span><span><i class="legend-dot purple"></i> Khách sắp đến</span><span><i class="legend-dot gray"></i> Bảo trì</span></div>
+          <div class="room-grid">
+            @for (r of shownRooms; track r.id) {
+              <button class="room-tile" [ngClass]="badge(r.displayStatus)" (click)="roomClick(r)">
+                <div class="room-top"><span class="room-number">{{ r.number }}</span><span class="room-symbol">{{ r.displayStatus === 'OCCUPIED' ? '◉' : r.displayStatus === 'MAINTENANCE' ? '⚙' : '✦' }}</span></div>
+                <div class="room-type">{{ r.roomTypeName }}</div><div class="room-guest">{{ r.current?.fullName || statusText(r.displayStatus) }}</div>
+                <div class="room-bottom"><span>{{ r.baseRate | number:'1.0-0' }} ₫/đêm</span><b>→</b></div>
+              </button>
+            }
+          </div>
+          @if (shownRooms.length === 0) { <div class="empty">Không tìm thấy phòng phù hợp.</div> }
+        </section>
+      }
+      @if (view === 'bookings') {
+        <div class="page-heading"><div><div class="eyebrow">FRONT DESK / RESERVATIONS</div><h1>Quản lý đặt phòng</h1><p>Danh sách đặt trước, check-in và hủy đặt phòng</p></div><button class="btn btn-primary" (click)="openModal('booking')">＋ Tạo đặt phòng</button></div>
+        <section class="panel table-panel"><div class="panel-head"><div><h2>Đặt phòng tại {{ currentProperty?.name }}</h2><p>{{ bookings.length }} đơn đặt phòng</p></div><input class="search" placeholder="⌕  Tìm mã, tên khách..." [(ngModel)]="filter"></div>
+          <div class="table-scroll"><table><thead><tr><th>MÃ ĐẶT</th><th>KHÁCH HÀNG</th><th>PHÒNG</th><th>NHẬN - TRẢ</th><th>GIÁ/ĐÊM</th><th>TRẠNG THÁI</th><th>THAO TÁC</th></tr></thead><tbody>
+            @for (b of bookings; track b.id) { @if (!filter || (b.code + ' ' + b.fullName + ' ' + b.roomNumber).toLowerCase().includes(filter.toLowerCase())) {
+              <tr><td><b>{{ b.code }}</b><small class="table-sub">{{ statusText(b.bookingSource) }}</small></td><td><b>{{ b.fullName }}</b><small class="table-sub">{{ b.phone }}</small></td><td><b>{{ b.roomNumber }}</b></td>
+                <td>{{ b.checkInDate | date:'dd/MM' }} → {{ b.checkOutDate | date:'dd/MM/yyyy' }}</td><td>{{ b.nightlyRate | number:'1.0-0' }} ₫</td><td><span class="badge" [ngClass]="badge(b.status)">{{ statusText(b.status) }}</span></td>
+                <td class="actions">@if (b.status === 'CONFIRMED') {<button class="small-btn active-btn" (click)="checkIn(b)">Check-in</button><button class="small-btn" (click)="openModal('deposit', { reservationId: b.id })">Thu cọc</button>@if (user?.role === 'CHAIN_ADMIN' || user?.role === 'PROPERTY_MANAGER') {<button class="small-btn" (click)="refundDeposit(b)">Hoàn cọc</button>}<button class="small-btn danger-btn" (click)="cancelBooking(b)">Hủy</button>}
+                  @if (b.status === 'CHECKED_IN') { <button class="small-btn" (click)="openFolioByReservation(b.id)">Mở folio →</button> }</td></tr>
+            }}
+            @if (!bookings.length) { <tr><td colspan="7" class="empty">Chưa có đơn đặt phòng.</td></tr> }
+          </tbody></table></div>
+        </section>
+      }
+      @if (view === 'stays') {
+        <div class="page-heading"><div><div class="eyebrow">FRONT DESK / IN-HOUSE</div><h1>Khách đang lưu trú</h1><p>Quản lý lưu trú, phát sinh, công nợ và check-out</p></div><button class="btn btn-outline" (click)="refresh()">↻ Làm mới</button></div>
+        <div class="stays-grid">@for (s of stays; track s.id) {
+          <div class="stay-card"><div class="stay-head"><span class="stay-room">{{ s.roomNumber }}</span><span class="badge checked-in">Đang lưu trú</span></div><h3>{{ s.fullName }}</h3><p>{{ s.code }} · {{ s.phone }}</p><div class="stay-meta"><div><small>Ngày nhận</small><b>{{ s.checkInDate | date:'dd/MM/yyyy' }}</b></div><div><small>Ngày trả dự kiến</small><b>{{ s.checkOutDate | date:'dd/MM/yyyy' }}</b></div></div><div class="stay-balance"><span>Số dư cần thanh toán</span><b>{{ s.charges - s.payments | number:'1.0-0' }} ₫</b></div><button class="btn btn-primary full" (click)="openFolio(s.id)">Mở hồ sơ & thanh toán →</button></div>
+        } @empty {<div class="empty-card">Chưa có khách đang lưu trú</div>}</div>
+      }
+      @if (view === 'housekeeping') {
+        <div class="page-heading"><div><div class="eyebrow">HOUSEKEEPING</div><h1>Buồng phòng & vệ sinh</h1><p>Trạng thái dọn phòng tách biệt với trạng thái có khách</p></div></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Danh sách phòng</h2><span class="info-tag">DIRTY → CLEAN → INSPECTED</span></div><div class="table-scroll"><table><thead><tr><th>PHÒNG</th><th>LOẠI</th><th>TẦNG</th><th>TRẠNG THÁI PHÒNG</th><th>VỆ SINH</th><th>THAO TÁC</th></tr></thead><tbody>
+          @for (r of rooms; track r.id) { <tr><td><b>{{ r.number }}</b></td><td>{{ r.roomTypeName }}</td><td>Tầng {{ r.floor }}</td><td><span class="badge" [ngClass]="badge(r.displayStatus)">{{ statusText(r.displayStatus) }}</span></td><td>{{ statusText(r.housekeepingStatus) }}</td><td class="actions">
+            @if (r.housekeepingStatus === 'DIRTY') {<button class="small-btn active-btn" (click)="housekeeping(r, 'CLEAN')">Đã dọn</button>}
+            @if (r.housekeepingStatus === 'CLEAN') {<button class="small-btn active-btn" (click)="housekeeping(r, 'INSPECTED')">Duyệt sẵn sàng</button>}
+            @if (r.housekeepingStatus === 'INSPECTED') {<button class="small-btn" (click)="housekeeping(r, 'DIRTY')">Yêu cầu dọn</button>}
+            @if (isManager) {<button class="small-btn danger-btn" (click)="maintenance(r)">{{ r.isOutOfOrder ? 'Mở bảo trì' : 'Khóa bảo trì' }}</button>}
+          </td></tr> }
+        </tbody></table></div></section>
+      }
+      @if (view === 'shifts') {
+        <div class="page-heading"><div><div class="eyebrow">CASHIER / SHIFTS</div><h1>Ca thu ngân</h1><p>Quản lý quỹ tiền mặt, mở ca và bàn giao</p></div><button class="btn btn-primary" (click)="openModal('openShift')">＋ Mở ca mới</button></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Danh sách ca</h2><span class="muted">Tiền mặt bắt buộc có ca mở theo tài khoản</span></div><div class="table-scroll"><table><thead><tr><th>MÃ CA</th><th>NGƯỜI THỰC HIỆN</th><th>GIỜ MỞ</th><th>QUỸ ĐẦU CA</th><th>QUỸ CUỐI CA</th><th>TRẠNG THÁI</th><th>THAO TÁC</th></tr></thead><tbody>
+          @for (s of shifts; track s.id) {<tr><td><b>#{{ s.id }}</b></td><td>Nhân viên #{{ s.userId }}</td><td>{{ s.openedAtUtc | date:'dd/MM/yyyy HH:mm' }}</td><td>{{ s.openingAmount | number:'1.0-0' }} ₫</td><td>{{ s.closingAmount == null ? '—' : (s.closingAmount | number:'1.0-0') + ' ₫' }}</td><td><span class="badge" [ngClass]="badge(s.status)">{{ statusText(s.status) }}</span></td><td>@if (s.status === 'OPEN' && (s.userId === user.id || isManager)) {<button class="small-btn active-btn" (click)="closeShiftAction(s)">Đóng ca</button>}</td></tr>}
+        </tbody></table></div></section>
+      }
+      @if (view === 'properties') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / CHAIN</div><h1>Cơ sở khách sạn</h1><p>Danh mục các khách sạn trong chuỗi, mỗi cơ sở có tài nguyên riêng</p></div><button class="btn btn-primary" (click)="openModal('property')">＋ Thêm cơ sở</button></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Danh sách khách sạn</h2></div><div class="table-scroll"><table><thead><tr><th>MÃ</th><th>TÊN CƠ SỞ</th><th>THÀNH PHỐ</th><th>ĐỊA CHỈ</th><th>TRẠNG THÁI</th></tr></thead><tbody>@for (p of properties; track p.id) {<tr><td><b>{{ p.code }}</b></td><td><b>{{ p.name }}</b></td><td>{{ p.city }}</td><td>{{ p.address }}</td><td><span class="badge inspected">Hoạt động</span></td></tr>}</tbody></table></div></section>
+      }
+      @if (view === 'users') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / ACCESS</div><h1>Nhân viên & phân quyền</h1><p>Quản lý tài khoản trong phạm vi khách sạn được giao</p></div><button class="btn btn-primary" (click)="openModal('user', { role: 'FRONT_DESK_AGENT' })">＋ Tạo nhân viên</button></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Tài khoản nhân viên</h2></div><div class="table-scroll"><table><thead><tr><th>HỌ VÀ TÊN</th><th>EMAIL</th><th>VAI TRÒ</th><th>TRẠNG THÁI</th></tr></thead><tbody>@for (u of users; track u.id) {<tr><td><b>{{ u.fullName }}</b></td><td>{{ u.email }}</td><td>{{ u.role }}</td><td><span class="badge" [ngClass]="u.isActive ? 'inspected' : 'cancelled'">{{ u.isActive ? 'Hoạt động' : 'Khóa' }}</span></td></tr>}</tbody></table></div></section>
+      }
+      @if (view === 'manageRooms') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / INVENTORY</div><h1>Quản lý phòng</h1><p>Quản trị hạng phòng, giá cơ sở và phòng vật lý</p></div><div class="heading-actions">@if (isManager) {<button class="btn btn-outline" (click)="openModal('roomType')">＋ Hạng phòng</button><button class="btn btn-primary" (click)="openModal('room')">＋ Thêm phòng</button>}</div></div>
+        <div class="type-grid">@for (t of roomTypes; track t.id) {<div class="type-card"><div class="type-icon">▧</div><div><strong>{{ t.name }}</strong><small>{{ t.code }} · {{ t.capacity }} khách</small><b>{{ t.baseRate | number:'1.0-0' }} ₫ <em>/đêm</em></b></div></div>}</div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Phòng hiện có ({{ rooms.length }})</h2></div><div class="table-scroll"><table><thead><tr><th>MÃ PHÒNG</th><th>HẠNG PHÒNG</th><th>TẦNG</th><th>GIÁ MẶC ĐỊNH</th><th>TÌNH TRẠNG</th></tr></thead><tbody>@for (r of rooms; track r.id) {<tr><td><b>{{ r.number }}</b></td><td>{{ r.roomTypeName }}</td><td>{{ r.floor }}</td><td>{{ r.baseRate | number:'1.0-0' }} ₫</td><td><span class="badge" [ngClass]="badge(r.displayStatus)">{{ statusText(r.displayStatus) }}</span></td></tr>}</tbody></table></div></section>
+      }
+      @if (view === 'services') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / MINIBAR</div><h1>Dịch vụ & minibar</h1><p>Danh mục phụ thu, hàng hóa và tồn kho dịch vụ</p></div>@if (isManager) {<button class="btn btn-primary" (click)="openModal('service')">＋ Thêm dịch vụ</button>}</div>
+        <div class="service-grid">@for (s of services; track s.id) {<div class="service-card"><span class="service-icon">◈</span><small>{{ s.code }}</small><h3>{{ s.name }}</h3><strong>{{ s.price | number:'1.0-0' }} ₫ <span>/{{ s.unit }}</span></strong><div class="service-foot"><span>{{ s.trackInventory ? 'Tồn kho: ' + s.stockQuantity : 'Không theo dõi tồn' }}</span>@if (isManager && s.trackInventory) {<button class="small-btn" (click)="openModal('restock', { id: s.id })">＋ Nhập kho</button>}</div></div>}</div>
+      }
+      @if (view === 'guests') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / CRM</div><h1>Danh sách khách hàng</h1><p>Hồ sơ khách từng có đặt phòng tại cơ sở</p></div></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Hồ sơ khách hàng</h2><span class="muted">Thông tin định danh nhạy cảm được hạn chế</span></div><div class="table-scroll"><table><thead><tr><th>MÃ KHÁCH</th><th>HỌ VÀ TÊN</th><th>ĐIỆN THOẠI</th><th>EMAIL</th><th>NGÀY TẠO</th></tr></thead><tbody>@for (g of guests; track g.id) {<tr><td>#{{ g.id }}</td><td><b>{{ g.fullName }}</b></td><td>{{ g.phone || '—' }}</td><td>{{ g.email || '—' }}</td><td>{{ g.createdAtUtc | date:'dd/MM/yyyy' }}</td></tr>}</tbody></table></div></section>
+      }
+      @if (view === 'agencies') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / CHANNELS</div><h1>Đại lý & kênh bán</h1><p>Danh mục đối tác lữ hành và hoa hồng cấu hình</p></div>@if (isManager) {<button class="btn btn-primary" (click)="openModal('agency')">＋ Thêm đại lý</button>}</div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Danh sách đối tác</h2></div><div class="table-scroll"><table><thead><tr><th>MÃ ĐỐI TÁC</th><th>TÊN ĐỐI TÁC</th><th>HOA HỒNG</th><th>ĐIỆN THOẠI</th></tr></thead><tbody>@for (a of agencies; track a.id) {<tr><td><b>{{ a.code }}</b></td><td>{{ a.name }}</td><td>{{ a.commissionPercent }}%</td><td>{{ a.contactPhone || '—' }}</td></tr>}</tbody></table></div></section>
+      }
+      @if (view === 'reports') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / REPORTS</div><h1>Báo cáo doanh thu</h1><p>Tổng hợp các khoản ghi sổ và dòng tiền theo ngày ghi nhận</p></div></div>
+        <section class="panel padded"><div class="toolbar"><label>Từ ngày <input type="date" [(ngModel)]="reportFrom"></label><label>Đến ngày <input type="date" [(ngModel)]="reportTo"></label><button class="btn btn-primary" (click)="loadReport()">Lọc báo cáo</button></div></section>
+        @if (report) {<div class="kpi-grid report-kpis"><div class="kpi-card"><div class="kpi-title">Doanh thu tiền phòng*</div><strong class="money">{{ report.roomRevenue | number:'1.0-0' }} ₫</strong></div><div class="kpi-card"><div class="kpi-title">Doanh thu dịch vụ*</div><strong class="money">{{ report.serviceRevenue | number:'1.0-0' }} ₫</strong></div><div class="kpi-card"><div class="kpi-title">Tổng ghi sổ*</div><strong class="money">{{ report.totalCharges | number:'1.0-0' }} ₫</strong></div><div class="kpi-card"><div class="kpi-title">Tiền thu thực tế</div><strong class="money">{{ report.totalCashIn | number:'1.0-0' }} ₫</strong></div></div><section class="panel padded"><h2>Phân tích dòng tiền</h2><div class="money-split"><div><span>Thu tiền mặt</span><b>{{ report.cash | number:'1.0-0' }} ₫</b></div><div><span>Chuyển khoản</span><b>{{ report.transfer | number:'1.0-0' }} ₫</b></div><div><span>Đơn tạo trong kỳ</span><b>{{ report.reservationCount }}</b></div></div><p class="report-note">* {{ report.note }}</p></section>}
+      }
+      @if (advancedViews.includes(view)) {<app-pms-advanced [view]="view" [propertyId]="propertyId" [user]="user" [properties]="properties"></app-pms-advanced>}
+      @if (view === 'audit') {
+        <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / AUDIT</div><h1>Nhật ký hệ thống</h1><p>Truy vết thao tác quan trọng để phục vụ kiểm thử QC</p></div></div>
+        <section class="panel table-panel"><div class="panel-head"><h2>Hoạt động gần đây</h2></div><div class="table-scroll"><table><thead><tr><th>THỜI GIAN</th><th>THAO TÁC</th><th>ĐỐI TƯỢNG</th><th>NGƯỜI THỰC HIỆN</th><th>CHI TIẾT</th></tr></thead><tbody>@for (a of audits; track a.id) {<tr><td>{{ a.occurredAtUtc | date:'dd/MM/yyyy HH:mm:ss' }}</td><td><b>{{ a.action }}</b></td><td>{{ a.entity }} #{{ a.entityId }}</td><td>User #{{ a.actorUserId }}</td><td>{{ a.details || '—' }}</td></tr>}</tbody></table></div></section>
+      }
+    </main>
+    <footer class="app-footer">Lotus PMS v2.0 Demo <span>·</span> Angular + ASP.NET Core + SQL Server <span>·</span> Không dùng cho dữ liệu thật</footer>
+  </div>
+</div>
+}
+
+@if (modal) {
+  <div class="modal-shade" (click)="modal = ''"><div class="modal" [class.wide-modal]="modal === 'folio'" (click)="$event.stopPropagation()">
+    <div class="modal-header"><div><div class="eyebrow">LOTUS PMS / {{ currentProperty?.code }}</div><h2>
+      {{ modal === 'booking' ? 'Tạo đặt phòng mới' : modal === 'property' ? 'Thêm cơ sở khách sạn' : modal === 'user' ? 'Tạo tài khoản nhân viên' : modal === 'folio' ? 'Chi tiết lưu trú & folio' : modal === 'payment' ? 'Ghi nhận thanh toán' : modal === 'deposit' ? 'Nhận tiền đặt cọc' : modal === 'addService' ? 'Thêm dịch vụ' : modal === 'roomType' ? 'Tạo hạng phòng' : modal === 'room' ? 'Thêm phòng mới' : modal === 'service' ? 'Thêm dịch vụ / minibar' : modal === 'agency' ? 'Thêm đại lý' : modal === 'restock' ? 'Nhập kho dịch vụ' : modal === 'openShift' ? 'Mở ca thu ngân' : modal === 'closeShift' ? 'Đóng ca thu ngân' : modal === 'extend' ? 'Gia hạn lưu trú' : modal === 'transfer' ? 'Đổi phòng' : 'Chi tiết' }}
+    </h2></div><button class="close" (click)="modal = ''" aria-label="Đóng">✕</button></div>
+    <div class="modal-body">
+      @if (modal === 'property') {<div class="field"><label>Mã cơ sở</label><input [(ngModel)]="form.code" placeholder="HP-CENTRAL"></div><div class="field"><label>Tên khách sạn</label><input [(ngModel)]="form.name" placeholder="Lotus Hải Phòng"></div><div class="field"><label>Thành phố</label><input [(ngModel)]="form.city"></div><div class="field"><label>Địa chỉ</label><input [(ngModel)]="form.address"></div><div class="field"><label>Điện thoại</label><input [(ngModel)]="form.phone"></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createProperty()">Lưu cơ sở</button></div>}
+      @if (modal === 'user') {<div class="field"><label>Họ và tên</label><input [(ngModel)]="form.fullName"></div><div class="field"><label>Email tài khoản</label><input type="email" [(ngModel)]="form.email"></div><div class="field"><label>Mật khẩu khởi tạo (≥8 ký tự)</label><input type="password" [(ngModel)]="form.password"></div><div class="field"><label>Vai trò</label><select [(ngModel)]="form.role"><option value="FRONT_DESK_AGENT">Lễ tân</option>@if (user.role === 'CHAIN_ADMIN') {<option value="PROPERTY_MANAGER">Quản lý khách sạn</option>}</select></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createUser()">Tạo tài khoản</button></div>}
+      @if (modal === 'booking') {
+        <div class="form-grid"><div class="field"><label>Ngày nhận phòng *</label><input type="date" [(ngModel)]="form.checkInDate" (ngModelChange)="searchAvailable()"></div><div class="field"><label>Ngày trả phòng *</label><input type="date" [(ngModel)]="form.checkOutDate" (ngModelChange)="searchAvailable()"></div>
+          <div class="field full-grid"><label>Phòng có thể bán *</label><select [(ngModel)]="form.roomId" (ngModelChange)="onBookingRoomChange()"><option [ngValue]="undefined">-- Chọn phòng trống --</option>@for (r of availableRooms; track r.id) {<option [ngValue]="r.id">{{ r.number }} · {{ r.roomTypeName }} · {{ r.baseRate | number:'1.0-0' }} ₫/đêm</option>}</select><small class="field-hint">Kiểm tra trùng lịch tại cả giao diện và SQL transaction</small></div>
+          <div class="field full-grid"><label>Họ và tên khách *</label><input [(ngModel)]="form.guestName" placeholder="Nguyễn Văn A"></div><div class="field"><label>Số điện thoại</label><input [(ngModel)]="form.phone" placeholder="09xxxxxxxx"></div><div class="field"><label>Email</label><input [(ngModel)]="form.email" placeholder="khach@example.com"></div>
+          <div class="field"><label>Người lớn</label><input type="number" min="1" [(ngModel)]="form.adults"></div><div class="field"><label>Trẻ em</label><input type="number" min="0" [(ngModel)]="form.children"></div>
+          <div class="field"><label>Giá phòng / đêm (VND)</label><input type="number" min="0" [(ngModel)]="form.nightlyRate"></div><div class="field"><label>Nguồn đặt</label><select [(ngModel)]="form.bookingSource"><option value="DIRECT">Trực tiếp</option><option value="OTA">OTA</option><option value="AGENCY">Đại lý</option><option value="PHONE">Điện thoại</option></select></div>
+          <div class="field"><label>Gói bảng giá</label><select [(ngModel)]="form.selectedRatePlanId" (ngModelChange)="onRatePlanChange()"><option [ngValue]="null">Theo giá hạng phòng</option>@for (rp of ratePlans; track rp.id) {<option [ngValue]="rp.id">{{ rp.name }} – {{ rp.basePrice | number:'1.0-0' }} ₫</option>}</select></div>
+          <div class="field"><label>Loại lưu trú</label><select [(ngModel)]="form.bookingMode"><option value="OVERNIGHT">Qua đêm</option><option value="DAY_USE">Nghỉ ngày</option><option value="HOURLY">Nghỉ giờ</option></select></div>
+          <div class="field"><label>Đại lý (nếu có)</label><select [(ngModel)]="form.agencyId"><option [ngValue]="null">Khách trực tiếp</option>@for (a of agencies; track a.id) {<option [ngValue]="a.id">{{ a.name }}</option>}</select></div>
+          <div class="field full-grid"><label>Ghi chú</label><textarea [(ngModel)]="form.note" rows="2" placeholder="Yêu cầu đặc biệt, giờ đến..."></textarea></div></div>
+        <div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy bỏ</button><button class="btn btn-primary" [disabled]="loading || !form.roomId || !form.guestName" (click)="createBooking()">Xác nhận đặt phòng →</button></div>
+      }
+      @if (modal === 'folio' && folio) {
+        <div class="folio-summary"><div><small>MÃ ĐẶT PHÒNG</small><strong>{{ folio.details.code }}</strong></div><div><small>KHÁCH LƯU TRÚ</small><strong>{{ folio.details.fullName }}</strong></div><div><small>PHÒNG</small><strong>{{ folio.details.roomNumber }}</strong></div><div><small>NHẬN / TRẢ</small><strong>{{ folio.details.checkInDate | date:'dd/MM' }} – {{ folio.details.checkOutDate | date:'dd/MM/yyyy' }}</strong></div></div>
+        <div class="folio-actions"><button class="small-btn" (click)="openModal('addService')">＋ Thêm dịch vụ</button><button class="small-btn" (click)="openModal('extend', {newCheckOutDate: folio.details.checkOutDate})">↗ Gia hạn</button><button class="small-btn" (click)="openModal('transfer'); searchAvailable()">⇄ Đổi phòng</button></div>
+        <div class="folio-table"><h3>Chi tiết phát sinh</h3><table><thead><tr><th>NỘI DUNG</th><th>SL</th><th>ĐƠN GIÁ</th><th>THÀNH TIỀN</th></tr></thead><tbody>@for (c of folio.charges; track c.id) {<tr><td>{{ c.description }} <span class="inline-tag">{{ c.category }}</span></td><td>{{ c.quantity }}</td><td>{{ c.unitPrice | number:'1.0-0' }}</td><td><b>{{ c.amount | number:'1.0-0' }} ₫</b></td></tr>}</tbody></table></div>
+        <div class="folio-table"><h3>Lịch sử thanh toán</h3><table><thead><tr><th>THỜI GIAN</th><th>HÌNH THỨC</th><th>LOẠI</th><th>SỐ TIỀN</th></tr></thead><tbody>@for (p of folio.payments; track p.id) {<tr><td>{{ p.paidAtUtc | date:'dd/MM/yyyy HH:mm' }}</td><td>{{ p.method }}</td><td>{{ p.kind }}</td><td><b>{{ p.amount | number:'1.0-0' }} ₫</b></td></tr> } @empty {<tr><td colspan="4" class="empty">Chưa có thanh toán.</td></tr>}</tbody></table></div>
+        <div class="folio-total"><div><span>Tổng phát sinh</span><b>{{ folio.total | number:'1.0-0' }} ₫</b></div><div><span>Đã thanh toán / cọc</span><b>{{ folio.paid | number:'1.0-0' }} ₫</b></div><div class="due"><span>Còn phải thanh toán</span><strong>{{ folio.balance | number:'1.0-0' }} ₫</strong></div></div>
+        <div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Đóng</button>@if (folio.balance > 0) {<button class="btn btn-primary" (click)="openModal('payment', {amount: folio.balance})">＋ Thu tiền</button>}<button class="btn btn-dark" [disabled]="folio.balance !== 0" (click)="checkout()">Check-out →</button></div>
+      }
+      @if (modal === 'payment' || modal === 'deposit') {<div class="field"><label>Số tiền (VND) *</label><input type="number" min="1" [(ngModel)]="form.amount"></div><div class="field"><label>Phương thức *</label><select [(ngModel)]="form.method"><option value="CASH">Tiền mặt (yêu cầu mở ca)</option><option value="TRANSFER">Chuyển khoản</option><option value="CARD">Thẻ</option></select></div><div class="field"><label>Mã giao dịch / ghi chú</label><input [(ngModel)]="form.reference" placeholder="Mã tham chiếu ngân hàng"></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" [disabled]="loading || form.amount <= 0" (click)="modal === 'deposit' ? deposit() : payment()">Xác nhận thu tiền</button></div>}
+      @if (modal === 'addService') {<div class="field"><label>Chọn dịch vụ</label><select [(ngModel)]="form.serviceId"><option [ngValue]="undefined">Chọn dịch vụ</option>@for (s of services; track s.id) {<option [ngValue]="s.id">{{ s.name }} · {{ s.price | number:'1.0-0' }} ₫</option>}</select></div><div class="field"><label>Số lượng</label><input type="number" min="1" [(ngModel)]="form.quantity"></div><div class="modal-actions"><button class="btn btn-outline" (click)="openFolio(folio.details.id)">Quay lại</button><button class="btn btn-primary" (click)="addService()">Ghi vào folio</button></div>}
+      @if (modal === 'roomType') {<div class="field"><label>Mã loại phòng</label><input [(ngModel)]="form.code" placeholder="DLX"></div><div class="field"><label>Tên loại phòng</label><input [(ngModel)]="form.name" placeholder="Deluxe Twin"></div><div class="form-grid"><div class="field"><label>Sức chứa (người)</label><input type="number" min="1" [(ngModel)]="form.capacity"></div><div class="field"><label>Giá cơ sở / đêm</label><input type="number" min="0" [(ngModel)]="form.baseRate"></div></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createRoomType()">Lưu hạng phòng</button></div>}
+      @if (modal === 'room') {<div class="field"><label>Số phòng</label><input [(ngModel)]="form.number" placeholder="406"></div><div class="field"><label>Tầng</label><input type="number" [(ngModel)]="form.floor"></div><div class="field"><label>Loại phòng</label><select [(ngModel)]="form.roomTypeId"><option [ngValue]="undefined">Chọn loại phòng</option>@for (r of roomTypes; track r.id) {<option [ngValue]="r.id">{{ r.name }}</option>}</select></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createRoom()">Lưu phòng</button></div>}
+      @if (modal === 'service') {<div class="field"><label>Mã dịch vụ</label><input [(ngModel)]="form.code" placeholder="MIN-COFFEE"></div><div class="field"><label>Tên dịch vụ</label><input [(ngModel)]="form.name" placeholder="Cà phê minibar"></div><div class="form-grid"><div class="field"><label>Đơn vị</label><input [(ngModel)]="form.unit"></div><div class="field"><label>Đơn giá (VND)</label><input type="number" [(ngModel)]="form.price"></div></div><label class="checkbox-line"><input type="checkbox" [(ngModel)]="form.trackInventory"> Theo dõi tồn kho minibar</label>@if (form.trackInventory) {<div class="field"><label>Số lượng tồn đầu</label><input type="number" min="0" [(ngModel)]="form.stockQuantity"></div>}<div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createService()">Lưu dịch vụ</button></div>}
+      @if (modal === 'agency') {<div class="field"><label>Mã đại lý</label><input [(ngModel)]="form.code" placeholder="AGENCY-001"></div><div class="field"><label>Tên đại lý</label><input [(ngModel)]="form.name"></div><div class="field"><label>Hoa hồng (%)</label><input type="number" min="0" max="100" [(ngModel)]="form.commissionPercent"></div><div class="field"><label>Điện thoại</label><input [(ngModel)]="form.contactPhone"></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="createAgency()">Lưu đại lý</button></div>}
+      @if (modal === 'restock') {<div class="field"><label>Số lượng nhập thêm</label><input type="number" min="1" [(ngModel)]="form.quantity"></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="restock()">Cập nhật tồn kho</button></div>}
+      @if (modal === 'openShift') {<div class="field"><label>Tiền quỹ đầu ca (VND)</label><input type="number" min="0" [(ngModel)]="form.openingAmount"></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="openShiftAction()">Mở ca</button></div>}
+      @if (modal === 'closeShift') {<div class="field"><label>Tiền quỹ cuối ca (VND)</label><input type="number" min="0" [(ngModel)]="form.closingAmount"></div><div class="field"><label>Ghi chú bàn giao</label><textarea [(ngModel)]="form.note" rows="2"></textarea></div><div class="modal-actions"><button class="btn btn-outline" (click)="modal = ''">Hủy</button><button class="btn btn-primary" (click)="confirmCloseShift()">Khóa ca</button></div>}
+      @if (modal === 'extend') {<div class="field"><label>Ngày trả mới</label><input type="date" [(ngModel)]="form.newCheckOutDate"></div><div class="modal-actions"><button class="btn btn-outline" (click)="openFolio(folio.details.id)">Quay lại</button><button class="btn btn-primary" (click)="extend()">Xác nhận gia hạn</button></div>}
+      @if (modal === 'transfer') {<div class="field"><label>Phòng mới</label><select [(ngModel)]="form.newRoomId"><option [ngValue]="undefined">Chọn phòng đang sẵn sàng</option>@for (r of rooms; track r.id) { @if (!r.current && !r.isOutOfOrder && r.housekeepingStatus === 'INSPECTED') {<option [ngValue]="r.id">{{ r.number }} · {{ r.roomTypeName }}</option>} }</select><small class="field-hint">Hệ thống kiểm tra trùng lịch trước khi chuyển. Demo giữ nguyên giá.</small></div><div class="modal-actions"><button class="btn btn-outline" (click)="openFolio(folio.details.id)">Quay lại</button><button class="btn btn-primary" (click)="transfer()">Xác nhận đổi phòng</button></div>}
+    </div>
+  </div></div>
+}
+@if (toastMessage) {<div class="toast" [class.toast-error]="toastIsError"><span>{{ toastIsError ? '!' : '✓' }}</span><p>{{ toastMessage }}</p><button (click)="toastMessage = ''">✕</button></div>}

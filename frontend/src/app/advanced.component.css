@@ -1,0 +1,47 @@
+.adv { display:block; padding:4px 0 32px; color:#203040; }
+.adv-header {display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:23px; }
+.adv-header h1 {margin:5px 0 8px;font-size:28px;line-height:1.2;letter-spacing:-.5px;color:#172a3a;}
+.adv-header p {margin:0;color:#75828f;font-size:13px;}
+.adv-eyebrow {font-size:10px;font-weight:750;letter-spacing:1.6px;color:#008d83;}
+.adv-layout {display:grid;grid-template-columns:minmax(270px,340px) minmax(0,1fr);gap:17px;align-items:start;}
+.adv-panel {background:white;border:1px solid #e5ecf2;border-radius:14px;padding:23px;margin-bottom:18px;box-shadow:0 6px 22px rgba(18,43,55,.035);min-width:0;}
+.adv-panel h2 {font-size:16px;color:#1b3341;margin:0 0 18px;font-weight:750;}
+.adv-panel h3 {font-size:13px;color:#203640;margin:22px 0 12px;}
+.adv-form {display:grid;gap:14px;}
+.adv-form.columns {grid-template-columns:repeat(2,minmax(0,1fr));max-width:850px;}
+.adv-form label, .adv-inline label {display:grid;gap:6px;font-size:12px;font-weight:650;color:#4a6372;}
+.adv-form input,.adv-form select,.adv-form textarea,.adv-inline select,.adv-inline input,.adv-scroll select {border:1px solid #dce5ec;border-radius:8px;outline:none;background:#fff;color:#193344;min-height:38px;padding:8px 10px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;}
+.adv-form input:focus,.adv-form select:focus,.adv-form textarea:focus,.adv-inline input:focus {border-color:#08a59a;box-shadow:0 0 0 3px #08a59a17;}
+.adv-btn {border:1px solid #d1dee6;color:#1a5660;background:#fff;border-radius:9px;padding:10px 13px;cursor:pointer;font:inherit;font-size:12px;font-weight:750;white-space:nowrap;}
+.adv-btn:hover {filter:brightness(.95);}
+.adv-btn:disabled {opacity:.45;cursor:not-allowed;}
+.adv-btn.primary {background:#008f85;border-color:#008f85;color:white;}
+.adv-btn.soft {background:#f3f7f8;}
+.adv-btn.tiny {padding:6px 8px;font-size:11px;}
+.adv-scroll {overflow-x:auto;}
+.adv-scroll table {border-collapse:collapse;width:100%;min-width:570px;font-size:12px;}
+.adv-scroll th {padding:13px 10px;text-transform:uppercase;letter-spacing:.65px;font-size:10px;color:#8b98a3;background:#f5f8fa;text-align:left;white-space:nowrap;}
+.adv-scroll td {padding:12px 10px;border-bottom:1px solid #edf2f5;color:#415565;vertical-align:middle;}
+.adv-scroll td b {font-weight:720;color:#20343f;}
+.adv-scroll td small {display:block;color:#8b99a5;margin-top:3px;}
+.adv-scroll select {min-width:130px;}
+.adv-inline {display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:15px 0;}
+.adv-inline input,.adv-inline select {width:auto;min-width:140px;max-width:230px;}
+.adv-message {margin:0 0 15px;padding:11px 15px;border-radius:8px;font-size:13px;}
+.adv-message.error {color:#982b23;background:#fff2ef;border:1px solid #ffd6cc;}
+.adv-message.ok {color:#136d52;background:#ecfaf2;border:1px solid #cbe9d8;}
+.adv-tag {display:inline-block;padding:4px 7px;background:#eff8f6;border-radius:6px;color:#188c80;font-weight:700;font-size:11px;}
+.adv-field {display:grid;gap:7px;color:#556e7a;font-size:12px;}
+.adv-room-picks {display:flex;flex-wrap:wrap;gap:8px;max-height:175px;overflow:auto;}
+.adv-room-picks label {display:flex;align-items:center;border:1px solid #dfe9ed;padding:8px 10px;border-radius:9px;background:#f9fbfc;font-size:12px;gap:4px;}
+.adv-room-picks label input {width:14px;height:14px;min-height:auto;}
+.adv-room-picks label small {color:#7f91a0;}
+.adv-actionbox {background:#f5fafb;border:1px solid #deeaed;padding:14px;border-radius:9px;margin:18px 0 0;}
+.adv-actionbox > small,.adv-note {font-size:12px;color:#78909b;line-height:1.6;margin:14px 0 0;}
+.adv-pill {display:block;border-radius:8px;background:#eff7f7;padding:10px 12px;margin:8px 0;font-weight:650;color:#216f72;font-size:12px;}
+.adv-kpis {display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin:0 0 18px;}
+.adv-kpis>div {background:white;border:1px solid #e7edf1;border-radius:13px;padding:19px;display:grid;gap:10px;}
+.adv-kpis span {font-size:12px;color:#7e8e99;}
+.adv-kpis strong {font-size:20px;letter-spacing:-.4px;color:#164b52;}
+.negative {color:#bf5049!important;font-weight:700;}
+@media(max-width:950px){.adv-layout {grid-template-columns:1fr;} .adv-form.columns {grid-template-columns:1fr;} .adv-header h1{font-size:23px;}}

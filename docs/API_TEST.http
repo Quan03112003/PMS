@@ -1,0 +1,38 @@
+### Dùng extension REST Client của VS Code hoặc Swagger UI (http://localhost:5080/swagger).
+### Demo creds: reception@pms.local / Demo@12345
+@baseUrl = http://localhost:5080
+@jwt = REPLACE_WITH_TOKEN_FROM_LOGIN
+@propertyId = 1
+
+### Ping
+GET {{baseUrl}}/api/health
+
+### Đăng nhập
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{"email":"reception@pms.local","password":"Demo@12345"}
+
+### Danh sách cơ sở
+GET {{baseUrl}}/api/properties
+Authorization: Bearer {{jwt}}
+
+### Sơ đồ phòng
+GET {{baseUrl}}/api/rooms?propertyId={{propertyId}}
+Authorization: Bearer {{jwt}}
+
+### Đặt phòng còn trống (thay ngày theo ngày hiện tại)
+GET {{baseUrl}}/api/availability?propertyId={{propertyId}}&startDate=2026-11-05&endDate=2026-11-07
+Authorization: Bearer {{jwt}}
+
+### Danh sách đơn đặt
+GET {{baseUrl}}/api/reservations?propertyId={{propertyId}}
+Authorization: Bearer {{jwt}}
+
+### Khách đang lưu trú
+GET {{baseUrl}}/api/stays?propertyId={{propertyId}}
+Authorization: Bearer {{jwt}}
+
+### Báo cáo
+GET {{baseUrl}}/api/reports/summary?propertyId={{propertyId}}&from=2026-11-01&to=2026-11-30
+Authorization: Bearer {{jwt}}

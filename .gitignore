@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.angular/
+bin/
+obj/
+.vs/
+*.user
+.env
+backend/HotelPms.Api/appsettings.Development.json
+appsettings.Production.json
+*.log

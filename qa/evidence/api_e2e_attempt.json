@@ -1,0 +1,19 @@
+{
+  "baseUrl": "http://localhost:5080",
+  "tag": "E2E-4DDE9079",
+  "dateUtc": "2026-11-05T07:49:31.723709+00:00",
+  "cases": [
+    {
+      "id": "API-01",
+      "status": "FAIL",
+      "title": "Health endpoint",
+      "detail": "Không kết nối được tới http://localhost:5080/api/health: [Errno 111] Connection refused"
+    },
+    {
+      "id": "PHASE-BLOCKED",
+      "status": "BLOCKED",
+      "title": "Kết nối & xác thực",
+      "detail": "Không kết nối được tới http://localhost:5080/api/health: [Errno 111] Connection refused"
+    }
+  ]
+}

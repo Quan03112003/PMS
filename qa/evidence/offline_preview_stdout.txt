@@ -1,0 +1,16 @@
+{'test': 'PV-01 Giao diện tải và render', 'status': 'PASS', 'details': 'header=Xin chào, Lễ tân Demo ✳'}
+{'test': 'PV-02 Dữ liệu ban đầu', 'status': 'PASS', 'details': ''}
+{'test': 'PV-03 Hiện biểu mẫu đặt phòng', 'status': 'PASS', 'details': ''}
+{'test': 'PV-04 Tạo đặt phòng', 'status': 'PASS', 'details': "{'id': 1793865208554, 'code': 'BK-OFF-08554', 'room': 5, 'guest': 'E2E UI Test Khách', 'phone': '0912342222', 'from': '2026-11-05', 'to': '2026-11-07', 'status': 'CONFIRMED', 'paid': 0, 'services': []}"}
+{'test': 'PV-05 Check-in đổi trạng thái', 'status': 'PASS', 'details': ''}
+{'test': 'PV-06 Mở folio', 'status': 'PASS', 'details': ''}
+{'test': 'PV-07 Ghi dịch vụ + trừ kho', 'status': 'PASS', 'details': ''}
+{'test': 'PV-08 Thanh toán đủ', 'status': 'PASS', 'details': 'charged=1930000,balance=0'}
+{'test': 'PV-09 Checkout → DIRTY', 'status': 'PASS', 'details': ''}
+{'test': 'PV-10 Dọn phòng → CLEAN', 'status': 'PASS', 'details': ''}
+{'test': 'PV-11 Duyệt phòng → INSPECTED', 'status': 'PASS', 'details': ''}
+{'test': 'PV-12 Chuyển cơ sở giữ dữ liệu tách biệt', 'status': 'PASS', 'details': ''}
+{'test': 'PV-13 Chặn đặt trùng phòng', 'status': 'PASS', 'details': ''}
+{'test': 'PV-14 Chặn checkout chưa thanh toán đủ', 'status': 'PASS', 'details': ''}
+{'test': 'PV-15 Chặn bán quá tồn kho', 'status': 'PASS', 'details': ''}
+{'test': 'PV-16 Không có lỗi JavaScript', 'status': 'PASS', 'details': '[]'}

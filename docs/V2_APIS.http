@@ -1,0 +1,61 @@
+@host = http://localhost:5080
+@token = PASTE_JWT_FROM_LOGIN
+@propertyId = 1
+@stayId = 1
+@groupCode = GR-REPLACE
+
+### Login (copy token into @token)
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{"email":"admin@pms.local","password":"Demo@12345"}
+
+### List buildings
+GET {{host}}/api/buildings?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Tariffs
+GET {{host}}/api/rate-plans?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Waitlist
+POST {{host}}/api/waitlist
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"propertyId":1,"guestName":"Khách chờ phòng","phone":"0900000000","checkInDate":"2026-11-06","checkOutDate":"2026-11-07","roomTypeId":null,"note":"Demo"}
+
+### Create group (replace with available room IDs)
+POST {{host}}/api/group-bookings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"propertyId":1,"guestName":"Đoàn công ty","phone":"0900000011","checkInDate":"2026-11-06","checkOutDate":"2026-11-07","roomIds":[8,9],"bookingSource":"DIRECT","note":"demo"}
+
+### Group list
+GET {{host}}/api/groups?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Debt list
+GET {{host}}/api/debts?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Stock ledger
+GET {{host}}/api/stock/movements?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Chain report
+GET {{host}}/api/reports/chain?from=2026-11-01&to=2026-11-30
+Authorization: Bearer {{token}}
+
+### Agency report
+GET {{host}}/api/reports/agencies?propertyId={{propertyId}}&from=2026-11-01&to=2026-11-30
+Authorization: Bearer {{token}}
+
+### Cash shifts
+GET {{host}}/api/shifts?propertyId={{propertyId}}
+Authorization: Bearer {{token}}
+
+### Registration CSV
+GET {{host}}/api/reports/registration-csv?propertyId={{propertyId}}&from=2026-11-01&to=2026-11-30
+Authorization: Bearer {{token}}

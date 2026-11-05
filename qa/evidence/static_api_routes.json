@@ -1,0 +1,7 @@
+{
+  "backendRoutes": 80,
+  "frontendDirectCallsMatched": 47,
+  "missingDirectRouteMappings": [],
+  "duplicateAnonymousKeys": [],
+  "invalidJsonConfigs": []
+}
