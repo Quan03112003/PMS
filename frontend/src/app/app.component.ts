@@ -139,7 +139,11 @@ export class AppComponent implements OnInit {
         this.loginBusy = false; this.token = r.token; this.user = r.user;
         localStorage.setItem('pms_token', r.token); localStorage.setItem('pms_user', JSON.stringify(r.user));
         this.loadProperties(); this.notice('Đăng nhập thành công');
-      }, error: e => { this.loginBusy = false; this.onError(e); }
+      }, error: e => {
+        this.loginBusy = false;
+        if (e?.status === 401) this.notice('Email hoặc mật khẩu không đúng', true);
+        else this.onError(e);
+      }
     });
   }
   logout(): void { localStorage.removeItem('pms_token'); localStorage.removeItem('pms_user'); this.user = null; this.token = ''; }
