@@ -505,6 +505,8 @@ api.MapGet("/audit", async (int propertyId, ClaimsPrincipal user, PmsDbContext d
     return Results.Ok(await db.AuditEvents.Where(x => x.PropertyId == propertyId).OrderByDescending(x => x.OccurredAtUtc).Take(100).ToListAsync());
 });
 app.MapPmsV2();
+app.MapPricingV4();
+app.MapNightAuditV4();
 app.Run();
 
 public record LoginRequest(string Email, string Password);

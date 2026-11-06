@@ -103,7 +103,53 @@
   }
 
   @if (view === 'dayclose') {
-    <div class="adv-layout"><section class="adv-panel"><h2>Snapshot tổng hợp ngày</h2><div class="adv-form"><label>Ngày ghi nhận (UTC) <input type="date" [(ngModel)]="form.businessDate"></label><button class="adv-btn primary" [disabled]="!canManageFinance" (click)="createClose()">Tạo snapshot</button></div><p class="adv-note">Không phải khóa sổ night audit: không thay đổi các charge, không ngăn chỉnh sửa giao dịch sau snapshot. Mỗi ngày chỉ tạo một bản.</p></section><section class="adv-panel wide"><h2>Lịch sử snapshot</h2><div class="adv-scroll"><table><thead><tr><th>Ngày</th><th>Tiền phòng ghi nhận</th><th>Dịch vụ ghi nhận</th><th>Tiền đã thu</th><th>Người chốt</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.businessDate}}</b></td><td>{{currency(x.roomCharges)}}</td><td>{{currency(x.serviceCharges)}}</td><td>{{currency(x.receivedAmount)}}</td><td>User #{{x.actorUserId}}</td></tr>}</tbody></table></div></section></div>
+    <div class="adv-layout"><section class="adv-panel"><h2>Snapshot tổng hợp ngày</h2><div class="adv-form"><label>Ngày ghi nhận (UTC) <input type="date" [(ngModel)]="form.businessDate"></label><div class="adv-inline"><button class="adv-btn primary" [disabled]="!canManageFinance" (click)="createClose()">Tạo snapshot</button><button class="adv-btn soft" (click)="runPrecheck()" [disabled]="prechecking">Kiểm tra trước chốt</button></div></div><p class="adv-note">Không phải khóa sổ night audit: không thay đổi các charge, không ngăn chỉnh sửa giao dịch sau snapshot. Mỗi ngày chỉ tạo một bản.</p>
+    @if (precheckResult) {
+      <div class="adv-actionbox"><b>Kiểm tra trước chốt ({{ precheckResult.businessDate }})</b><div class="adv-inline" style="margin: 8px 0;"><span class="adv-tag" [class.negative]="!precheckResult.canClose">{{ precheckResult.canClose ? 'ĐỦ ĐIỀU KIỆN CHỐT' : 'CÒN CẢNH BÁO' }}</span><span class="adv-tag">Ca mở: {{ precheckResult.openShiftsCount }}</span><span class="adv-tag">Chưa nhận: {{ precheckResult.pendingArrivalsCount }}</span><span class="adv-tag">Chưa trả: {{ precheckResult.pendingDeparturesCount }}</span></div>
+      @if (precheckResult.warnings?.length) {<ul style="padding-left: 18px; margin: 4px 0; color: #b73229; font-size: 12px;">@for (w of precheckResult.warnings; track w) {<li>{{ w }}</li>}</ul>}
+      </div>
+    }
+    </section><section class="adv-panel wide"><h2>Lịch sử snapshot</h2><div class="adv-scroll"><table><thead><tr><th>Ngày</th><th>Tiền phòng ghi nhận</th><th>Dịch vụ ghi nhận</th><th>Tiền đã thu</th><th>Người chốt</th></tr></thead><tbody>@for(x of items;track x.id){<tr><td><b>{{x.businessDate}}</b></td><td>{{currency(x.roomCharges)}}</td><td>{{currency(x.serviceCharges)}}</td><td>{{currency(x.receivedAmount)}}</td><td>User #{{x.actorUserId}}</td></tr>}</tbody></table></div></section></div>
+  }
+
+  @if (view === 'pricingQuote') {
+    <div class="adv-layout"><section class="adv-panel"><h2>Báo giá & Phụ thu (V4 Server-side)</h2><div class="adv-form">
+      <label>Bảng giá <select [(ngModel)]="quoteForm.ratePlanId"><option [ngValue]="null">-- Chọn bảng giá --</option>@for (p of ratePlans; track p.id) {<option [ngValue]="p.id">{{ p.code }} · {{ p.name }} ({{ p.mode }}: {{ currency(p.basePrice) }})</option>}</select></label>
+      <label>Ngày nhận phòng <input type="date" [(ngModel)]="quoteForm.checkInDate"></label>
+      <label>Ngày trả phòng <input type="date" [(ngModel)]="quoteForm.checkOutDate"></label>
+      <label>Giờ nhận thực tế (tùy chọn) <input type="datetime-local" [(ngModel)]="quoteForm.actualCheckInLocal"></label>
+      <label>Giờ trả thực tế (tùy chọn) <input type="datetime-local" [(ngModel)]="quoteForm.actualCheckOutLocal"></label>
+      <button class="adv-btn primary" (click)="calculateQuote()">Tính báo giá</button>
+    </div><p class="adv-note">API tính giá trên máy chủ; không dùng công thức từ giao diện. Báo giá tham khảo không ghi vào database.</p></section>
+    <section class="adv-panel wide">
+      @if (quoteResult) {
+        <h2>Kết quả báo giá máy chủ</h2>
+        <div class="adv-kpis">
+          <div><span>Bảng giá</span><strong>{{ quoteResult.ratePlanCode }} ({{ quoteResult.bookingMode }})</strong></div>
+          <div><span>Tiền gói / phòng</span><strong>{{ currency(quoteResult.baseAmount) }}</strong></div>
+          <div><span>Nhận sớm ({{ quoteResult.earlyHours }}h)</span><strong>{{ currency(quoteResult.earlyFee) }}</strong></div>
+          <div><span>Trả muộn ({{ quoteResult.lateHours }}h)</span><strong>{{ currency(quoteResult.lateFee) }}</strong></div>
+          <div><span>Quá giờ ({{ quoteResult.overtimeHours }}h)</span><strong>{{ currency(quoteResult.overtimeFee) }}</strong></div>
+          <div><span>Tổng cộng</span><strong style="color: #008d7c;">{{ currency(quoteResult.totalAmount) }}</strong></div>
+        </div>
+        <p class="adv-note" style="margin-top: 10px;">{{ quoteResult.note }}</p>
+      } @else {
+        <div class="adv-panel" style="text-align: center; color: #64748b; padding: 40px 20px;"><p>Vui lòng chọn bảng giá và khoảng ngày để tính báo giá ước tính từ máy chủ.</p></div>
+      }
+      @if (canManage) {
+        <div class="adv-actionbox" style="margin-top: 20px;">
+          <h3>Ghi phụ thu thực tế vào folio (Chỉ Quản lý)</h3>
+          <p style="font-size: 12px; color: #475569;">Ghi phụ thu nhận sớm, trả muộn hoặc quá giờ trực tiếp vào hóa đơn của khách đang lưu trú. API dùng row lock và chống ghi trùng.</p>
+          <div class="adv-form columns">
+            <label>Phòng đang ở <select [(ngModel)]="adjustForm.stayId"><option [ngValue]="null">-- Chọn phòng --</option>@for (s of stays; track s.id) {<option [ngValue]="s.id">Phòng {{ s.roomNumber }} · {{ s.fullName }}</option>}</select></label>
+            <label>Bảng giá phụ thu <select [(ngModel)]="adjustForm.ratePlanId"><option [ngValue]="null">-- Chọn bảng giá --</option>@for (p of ratePlans; track p.id) {<option [ngValue]="p.id">{{ p.code }} (Phụ thu: {{ currency(p.extraHourPrice) }}/h)</option>}</select></label>
+            <label>Loại phụ thu <select [(ngModel)]="adjustForm.kind"><option value="EARLY_CHECKIN">Nhận sớm (EARLY_CHECKIN)</option><option value="LATE_CHECKOUT">Trả muộn (LATE_CHECKOUT)</option><option value="OVERTIME">Quá giờ (OVERTIME)</option></select></label>
+            <label>Thời gian thực tế (VN) <input type="datetime-local" [(ngModel)]="adjustForm.actualAtLocal"></label>
+          </div>
+          <button class="adv-btn primary" [disabled]="submitting || !adjustForm.stayId || !adjustForm.ratePlanId || !adjustForm.actualAtLocal" (click)="postAdjustment()">Xác nhận ghi phụ thu vào folio</button>
+        </div>
+      }
+    </section></div>
   }
 
   @if (view === 'chain') {

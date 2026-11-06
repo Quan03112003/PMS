@@ -43,13 +43,14 @@ export class AppComponent implements OnInit {
   reportTo = localIsoDate(0);
   sidebarOpen = false;
 
-  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','agencyReports','shiftReconcile','registration'];
+  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','agencyReports','shiftReconcile','registration','pricingQuote'];
 
   menuGroups = [
     { title: 'TỔNG QUAN', items: [{ id: 'dashboard', label: 'Bảng điều khiển', icon: '◫' }] },
     { title: 'LỄ TÂN', items: [
       { id: 'roommap', label: 'Sơ đồ phòng', icon: '▦' },
       { id: 'bookings', label: 'Đặt phòng', icon: '▤' },
+      { id: 'pricingQuote', label: 'Báo giá & phụ thu', icon: '₫' },
       { id: 'groups', label: 'Khách đoàn', icon: '▦' },
       { id: 'waitlist', label: 'Phòng hàng đợi', icon: '◷' },
       { id: 'transfers', label: 'Chuyển dịch vụ', icon: '⇆' },
@@ -99,8 +100,8 @@ export class AppComponent implements OnInit {
   canView(itemId: string): boolean {
     if (this.isManager) return itemId !== 'properties' || this.isChainAdmin;
     const roleViews: Record<string, string[]> = {
-      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests'],
-      SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates'],
+      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests','pricingQuote'],
+      SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates','pricingQuote'],
       HOUSEKEEPING_AGENT: ['dashboard','roommap','housekeeping'],
       MAINTENANCE_AGENT: ['dashboard','roommap','housekeeping','manageRooms'],
       ACCOUNTING_AGENT: ['dashboard','bookings','stays','shifts','vouchers','debts','reports','dayclose','shiftReconcile','guests']

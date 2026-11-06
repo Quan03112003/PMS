@@ -48,12 +48,19 @@ export class AdvancedComponent implements OnChanges {
   transferQty = 1;
   selectedWaitlistId = 0;
   selectedRoomId = 0;
+  ratePlans: any[] = [];
+  quoteForm: any = { ratePlanId: null, checkInDate: day(), checkOutDate: day(1), actualCheckInLocal: '', actualCheckOutLocal: '' };
+  quoteResult: any = null;
+  adjustForm: any = { stayId: null, ratePlanId: null, kind: 'LATE_CHECKOUT', actualAtLocal: '' };
+  precheckResult: any = null;
+  prechecking = false;
   titles: Record<string, string> = {
     waitlist: 'Đặt phòng hàng đợi', groups: 'Khách đoàn & thanh toán hộ', transfers: 'Chuyển dịch vụ giữa các phòng',
     rates: 'Bảng giá giờ / ngày / đêm', buildings: 'Tòa nhà & phân phòng', stockledger: 'Nhập xuất tồn kho',
     suppliers: 'Nhà cung cấp', retail: 'Bán hàng ngoài phòng', vouchers: 'Phiếu thu – phiếu chi',
     debts: 'Công nợ khách hàng', assets: 'Tài sản khách gửi', dayclose: 'Snapshot chốt ngày',
-    chain: 'Tổng hợp toàn chuỗi', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú'
+    chain: 'Tổng hợp toàn chuỗi', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
+    pricingQuote: 'Báo giá & phụ thu'
   };
   constructor(private api: ApiService) { this.resetForm(); }
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
@@ -98,6 +105,49 @@ export class AdvancedComponent implements OnChanges {
     if (this.view === 'agencyReports') this.loadAgencyReport();
     if (this.view === 'shiftReconcile') this.fetch(`/shifts?propertyId=${id}`, 'items');
     if (this.view === 'groups') this.searchRooms();
+    if (this.view === 'pricingQuote') {
+      this.fetch(`/rate-plans?propertyId=${id}`, 'ratePlans');
+      this.fetch(`/stays?propertyId=${id}`, 'stays');
+    }
+  }
+  calculateQuote(): void {
+    this.error = ''; this.success = '';
+    if (!this.quoteForm.ratePlanId) { this.error = 'Vui lòng chọn bảng giá'; return; }
+    const body: any = {
+      propertyId: +this.propertyId,
+      ratePlanId: +this.quoteForm.ratePlanId,
+      checkInDate: this.quoteForm.checkInDate,
+      checkOutDate: this.quoteForm.checkOutDate
+    };
+    if (this.quoteForm.actualCheckInLocal) body.actualCheckInLocal = this.quoteForm.actualCheckInLocal;
+    if (this.quoteForm.actualCheckOutLocal) body.actualCheckOutLocal = this.quoteForm.actualCheckOutLocal;
+    this.api.post('/pricing/quote', body).subscribe({
+      next: r => { this.quoteResult = r; },
+      error: e => { this.error = e?.error?.message || 'Lỗi tính báo giá'; }
+    });
+  }
+  postAdjustment(): void {
+    if (!this.canManage) { this.error = 'Chỉ Quản lý hoặc Admin mới có quyền ghi phụ thu vào folio.'; return; }
+    if (!this.adjustForm.stayId) { this.error = 'Vui lòng chọn lượt lưu trú'; return; }
+    if (!this.adjustForm.ratePlanId) { this.error = 'Vui lòng chọn bảng giá phụ thu'; return; }
+    if (!this.adjustForm.actualAtLocal) { this.error = 'Vui lòng nhập thời gian thực tế'; return; }
+    const stayId = +this.adjustForm.stayId;
+    const body = {
+      kind: this.adjustForm.kind,
+      ratePlanId: +this.adjustForm.ratePlanId,
+      actualAtLocal: this.adjustForm.actualAtLocal
+    };
+    this.submit(`/stays/${stayId}/pricing-adjustments`, body, () => {
+      this.adjustForm = { stayId: null, ratePlanId: null, kind: 'LATE_CHECKOUT', actualAtLocal: '' };
+    });
+  }
+  runPrecheck(): void {
+    this.prechecking = true; this.error = '';
+    const date = this.form.businessDate || day();
+    this.api.get(`/night-audit/precheck?propertyId=${this.propertyId}&businessDate=${date}`).subscribe({
+      next: res => { this.precheckResult = res; this.prechecking = false; },
+      error: e => { this.error = e?.error?.message || 'Lỗi kiểm tra trước chốt'; this.prechecking = false; }
+    });
   }
   submit(path: string, body: any, after?: () => void): void {
     if (this.submitting) return;
