@@ -12,6 +12,7 @@ public static class AdvancedEndpoints
     public static void MapPmsV2(this WebApplication app)
     {
         var api = app.MapGroup("/api").RequireAuthorization();
+        api.AddEndpointFilter(Ops.DepartmentAccess);
 
         // MANAGEMENT: buildings / multi-building property and tariffs.
         api.MapGet("/buildings", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) =>
@@ -364,7 +365,7 @@ public static class AdvancedEndpoints
         api.MapGet("/vouchers", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) =>
             Ops.HasScope(actor, propertyId) ? (IResult)Results.Ok(await db.Vouchers.Where(x => x.PropertyId == propertyId).OrderByDescending(x => x.Id).Take(200).ToListAsync()) : Results.Forbid());
         api.MapPost("/vouchers", async (VoucherInput req, ClaimsPrincipal actor, PmsDbContext db) => {
-            if (!Ops.CanManage(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
+            if (!Ops.CanManageFinance(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
             if (!new[] { "RECEIPT", "EXPENSE" }.Contains(req.Type) || !Methods.Contains(req.Method) || req.Amount <= 0 || req.Amount > 10000000000) return Ops.Fail("Phiếu thu/chi không hợp lệ");
             var shiftId = await GetShiftId(db, actor, req.PropertyId, req.Method);
             if (req.Method == "CASH" && shiftId == null) return Ops.Conflict("Cần mở ca để ghi phiếu tiền mặt");
@@ -391,7 +392,7 @@ public static class AdvancedEndpoints
 
         // MANAGEMENT REPORTS: by property and chain; snapshot only, NOT audited night posting.
         api.MapGet("/reports/chain", async (DateOnly from, DateOnly to, ClaimsPrincipal actor, PmsDbContext db) => {
-            if (!Ops.CanManage(actor)) return Results.Forbid(); if (from > to || to.DayNumber - from.DayNumber > 366) return Ops.Fail("Chỉ xem báo cáo tối đa 366 ngày");
+            if (!Ops.CanManageFinance(actor)) return Results.Forbid(); if (from > to || to.DayNumber - from.DayNumber > 366) return Ops.Fail("Chỉ xem báo cáo tối đa 366 ngày");
             var pid = Ops.UserProperty(actor);
             var properties = await db.Properties.Where(x => x.IsActive && (!pid.HasValue || x.Id == pid)).ToListAsync();
             var ids = properties.Select(p => p.Id).ToArray(); var all = new List<object>();
@@ -436,7 +437,7 @@ public static class AdvancedEndpoints
         });
         api.MapGet("/shifts/{id:int}/reconcile", async (int id, ClaimsPrincipal actor, PmsDbContext db) => {
             var shift = await db.Shifts.FindAsync(id); if (shift == null) return Results.NotFound();
-            if (!Ops.CanManage(actor) || !Ops.HasScope(actor, shift.PropertyId)) return Results.Forbid();
+            if (!Ops.CanManageFinance(actor) || !Ops.HasScope(actor, shift.PropertyId)) return Results.Forbid();
             var received = await db.Payments.Where(x => x.ShiftId == id && x.Method == "CASH").SumAsync(x => (decimal?)x.Amount) ?? 0;
             var retail = await db.RetailSales.Where(x => x.ShiftId == id && x.PaymentMethod == "CASH").SumAsync(x => (decimal?)x.TotalAmount) ?? 0;
             var vouchers = await db.Vouchers.Where(x => x.ShiftId == id && x.Method == "CASH").ToListAsync();
@@ -464,7 +465,7 @@ public static class AdvancedEndpoints
         api.MapGet("/daily-closes", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) =>
             Ops.HasScope(actor, propertyId) ? (IResult)Results.Ok(await db.DailyCloses.Where(x => x.PropertyId == propertyId).OrderByDescending(x => x.BusinessDate).Take(90).ToListAsync()) : Results.Forbid());
         api.MapPost("/daily-closes", async (DailyCloseInput req, ClaimsPrincipal actor, PmsDbContext db) => {
-            if (!Ops.CanManage(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
+            if (!Ops.CanManageFinance(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
             if (req.BusinessDate > DateOnly.FromDateTime(DateTime.UtcNow)) return Ops.Fail("Không được chốt ngày tương lai");
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             if (await db.DailyCloses.AnyAsync(x => x.PropertyId == req.PropertyId && x.BusinessDate == req.BusinessDate)) return Ops.Conflict("Ngày này đã có snapshot");

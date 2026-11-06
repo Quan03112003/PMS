@@ -94,6 +94,35 @@ export class AppComponent implements OnInit {
   }
 
   get isManager(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
+  get isChainAdmin(): boolean { return this.user?.role === 'CHAIN_ADMIN'; }
+  get canMaintain(): boolean { return this.isManager || this.user?.role === 'MAINTENANCE_AGENT'; }
+  canView(itemId: string): boolean {
+    if (this.isManager) return itemId !== 'properties' || this.isChainAdmin;
+    const roleViews: Record<string, string[]> = {
+      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests'],
+      SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates'],
+      HOUSEKEEPING_AGENT: ['dashboard','roommap','housekeeping'],
+      MAINTENANCE_AGENT: ['dashboard','roommap','housekeeping','manageRooms'],
+      ACCOUNTING_AGENT: ['dashboard','bookings','stays','shifts','vouchers','debts','reports','dayclose','shiftReconcile','guests']
+    };
+    return roleViews[this.user?.role || '']?.includes(itemId) ?? false;
+  }
+  departmentName(role: string): string {
+    const names: Record<string, string> = {
+      CHAIN_ADMIN: 'Quản trị toàn chuỗi', PROPERTY_MANAGER: 'Quản lý khách sạn', FRONT_DESK_AGENT: 'Lễ tân',
+      SALES_AGENT: 'Kinh doanh', HOUSEKEEPING_AGENT: 'Buồng phòng', MAINTENANCE_AGENT: 'Bảo trì', ACCOUNTING_AGENT: 'Kế toán'
+    };
+    return names[role] || role;
+  }
+  propertyName(propertyId: number | null): string { return this.properties.find(p => p.id === propertyId)?.name || 'Toàn chuỗi'; }
+  get creatableRoles(): { value: string; label: string }[] {
+    const departments = [
+      { value: 'FRONT_DESK_AGENT', label: 'Lễ tân' }, { value: 'SALES_AGENT', label: 'Kinh doanh' },
+      { value: 'HOUSEKEEPING_AGENT', label: 'Buồng phòng' }, { value: 'MAINTENANCE_AGENT', label: 'Bảo trì' },
+      { value: 'ACCOUNTING_AGENT', label: 'Kế toán' }
+    ];
+    return this.isChainAdmin ? [{ value: 'CHAIN_ADMIN', label: 'Quản trị toàn chuỗi' }, { value: 'PROPERTY_MANAGER', label: 'Quản lý khách sạn' }, ...departments] : departments;
+  }
   get currentProperty(): any { return this.properties.find(p => p.id === Number(this.propertyId)); }
   get shownRooms(): any[] {
     return this.rooms.filter(r => (this.floor === 0 || r.floor === Number(this.floor)) &&
@@ -110,7 +139,7 @@ export class AppComponent implements OnInit {
         this.loginBusy = false; this.token = r.token; this.user = r.user;
         localStorage.setItem('pms_token', r.token); localStorage.setItem('pms_user', JSON.stringify(r.user));
         this.loadProperties(); this.notice('Đăng nhập thành công');
-      }, error: () => { this.loginBusy = false; this.notice('Sai tài khoản/mật khẩu hoặc API chưa chạy', true); }
+      }, error: e => { this.loginBusy = false; this.onError(e); }
     });
   }
   logout(): void { localStorage.removeItem('pms_token'); localStorage.removeItem('pms_user'); this.user = null; this.token = ''; }
@@ -141,8 +170,8 @@ export class AppComponent implements OnInit {
     this.api.get(`/dashboard?propertyId=${id}`).subscribe({ next: r => this.dashboard = r, error: e => this.onError(e) });
     this.api.get<any[]>(`/rooms?propertyId=${id}`).subscribe({ next: r => this.rooms = r, error: e => this.onError(e) });
     this.api.get<any[]>(`/room-types?propertyId=${id}`).subscribe({ next: r => this.roomTypes = r, error: e => this.onError(e) });
-    if (['bookings', 'dashboard'].includes(this.view)) this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
-    if (['stays', 'dashboard', 'roommap'].includes(this.view)) this.api.get<any[]>(`/stays?propertyId=${id}`).subscribe({ next: r => this.stays = r, error: e => this.onError(e) });
+    if (['bookings', 'dashboard'].includes(this.view) && this.canView('bookings')) this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
+    if (['stays', 'dashboard', 'roommap'].includes(this.view) && this.canView('stays')) this.api.get<any[]>(`/stays?propertyId=${id}`).subscribe({ next: r => this.stays = r, error: e => this.onError(e) });
     if (['services', 'stays'].includes(this.view)) this.api.get<any[]>(`/services?propertyId=${id}`).subscribe({ next: r => this.services = r, error: e => this.onError(e) });
     if (this.view === 'users') this.api.get<any[]>(`/users?propertyId=${id}`).subscribe({ next: r => this.users = r, error: e => this.onError(e) });
     if (this.view === 'guests') this.api.get<any[]>(`/guests?propertyId=${id}`).subscribe({ next: r => this.guests = r, error: e => this.onError(e) });
@@ -185,7 +214,23 @@ export class AppComponent implements OnInit {
   createRoom(): void { this.run(this.api.post('/rooms', { ...this.form, roomTypeId: Number(this.form.roomTypeId), floor: Number(this.form.floor) })); }
   createService(): void { this.run(this.api.post('/services', { ...this.form, price: Number(this.form.price), stockQuantity: Number(this.form.stockQuantity) })); }
   createProperty(): void { this.run(this.api.post('/properties', this.form), () => this.loadProperties(), 'Đã tạo cơ sở khách sạn'); }
-  createUser(): void { this.run(this.api.post('/users', { ...this.form, role: this.form.role || 'FRONT_DESK_AGENT' })); }
+  createUser(): void {
+    const role = this.form.role || 'FRONT_DESK_AGENT';
+    const payload = { ...this.form, role, propertyId: role === 'CHAIN_ADMIN' ? null : Number(this.form.propertyId || this.propertyId) };
+    this.run(this.api.post('/users', payload));
+  }
+  editUser(user: any): void { this.openModal('editUser', { ...user, password: '' }); }
+  updateUser(): void {
+    const role = this.form.role;
+    const payload = { ...this.form, role, propertyId: role === 'CHAIN_ADMIN' ? null : Number(this.form.propertyId), password: this.form.password || null };
+    this.run(this.api.patch(`/users/${this.form.id}`, payload));
+  }
+  toggleUser(user: any): void {
+    const action = user.isActive ? 'khóa' : 'mở khóa';
+    if (!confirm(`Bạn muốn ${action} tài khoản ${user.email}?`)) return;
+    this.run(this.api.patch(`/users/${user.id}`, { ...user, isActive: !user.isActive, password: null }), undefined,
+      user.isActive ? 'Đã khóa tài khoản' : 'Đã mở khóa tài khoản');
+  }
   createAgency(): void { this.run(this.api.post('/agencies', { ...this.form, commissionPercent: Number(this.form.commissionPercent) })); }
   restock(): void { this.run(this.api.post(`/services/${this.form.id}/restock`, { quantity: Number(this.form.quantity) })); }
   checkIn(b: any): void { if (confirm(`Nhận phòng ${b.roomNumber} cho ${b.fullName}?`)) this.run(this.api.post(`/reservations/${b.id}/check-in`, {}), () => this.setView('stays'), 'Check-in thành công'); }
@@ -233,7 +278,7 @@ export class AppComponent implements OnInit {
     () => this.openFolio(this.folio.details.id), 'Đã đổi phòng. Phòng cũ chuyển Chưa dọn.'); }
   housekeeping(room: any, status: string): void { this.run(this.api.patch(`/rooms/${room.id}/housekeeping`, { status }), undefined, `Phòng ${room.number}: ${this.statusText(status)}`); }
   maintenance(room: any): void {
-    if (!this.isManager) return;
+    if (!this.canMaintain) return;
     this.run(this.api.patch(`/rooms/${room.id}/maintenance`, { isOutOfOrder: !room.isOutOfOrder, note: !room.isOutOfOrder ? 'Khóa bảo trì từ giao diện PMS' : '' }));
   }
   openShiftAction(): void { this.run(this.api.post('/shifts/open', { propertyId: this.propertyId, openingAmount: Number(this.form.openingAmount) })); }

@@ -57,6 +57,7 @@ export class AdvancedComponent implements OnChanges {
   };
   constructor(private api: ApiService) { this.resetForm(); }
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
+  get canManageFinance(): boolean { return this.canManage || this.user?.role === 'ACCOUNTING_AGENT'; }
   get isChainAdmin(): boolean { return this.user?.role === 'CHAIN_ADMIN'; }
   get reportTotals(): any {
     const p = this.report?.properties ?? [];

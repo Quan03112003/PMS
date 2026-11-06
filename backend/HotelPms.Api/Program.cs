@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
 using HotelPms.Api;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -70,6 +71,7 @@ app.MapPost("/api/auth/login", async (LoginRequest req, PmsDbContext db, IPasswo
 });
 
 var api = app.MapGroup("/api").RequireAuthorization();
+api.AddEndpointFilter(Ops.DepartmentAccess);
 api.MapGet("/properties", async (ClaimsPrincipal user, PmsDbContext db) => {
     var scope = Ops.UserProperty(user);
     var query = db.Properties.AsNoTracking().Where(p => p.IsActive);
@@ -88,23 +90,53 @@ api.MapPost("/properties", async (PropertyInput req, ClaimsPrincipal user, PmsDb
 });
 api.MapGet("/users", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.CanManage(user) || !Ops.HasScope(user, propertyId)) return Results.Forbid();
-    return Results.Ok(await db.Users.Where(x => x.PropertyId == propertyId)
-        .Select(x => new { x.Id, x.FullName, x.Email, x.Role, x.PropertyId, x.IsActive }).OrderBy(x => x.Id).ToListAsync());
+    var users = await db.Users.Where(x => x.PropertyId == propertyId ||
+        (user.IsInRole("CHAIN_ADMIN") && x.PropertyId == null && x.Role == "CHAIN_ADMIN"))
+        .OrderBy(x => x.Id).ToListAsync();
+    return Results.Ok(users.Select(x => new { x.Id, x.FullName, x.Email, x.Role, Department = Ops.DepartmentName(x.Role), x.PropertyId, x.IsActive }));
 });
 api.MapPost("/users", async (UserInput req, ClaimsPrincipal actor, PmsDbContext db, IPasswordHasher<AppUser> hasher) => {
-    if (!Ops.CanManage(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
-    if (!actor.IsInRole("CHAIN_ADMIN") && req.Role != "FRONT_DESK_AGENT") return Results.Forbid();
-    if (!new[] { "FRONT_DESK_AGENT", "PROPERTY_MANAGER" }.Contains(req.Role) ||
-        string.IsNullOrWhiteSpace(req.FullName) || !req.Email.Contains('@') || req.Password.Length < 8)
+    if (!Ops.CanManage(actor)) return Results.Forbid();
+    if (!Ops.IsValidRole(req.Role) || (req.Role == "CHAIN_ADMIN" && (!actor.IsInRole("CHAIN_ADMIN") || req.PropertyId != null)) ||
+        (req.Role != "CHAIN_ADMIN" && !req.PropertyId.HasValue)) return Ops.Fail("Vai trò hoặc cơ sở không hợp lệ");
+    if (!actor.IsInRole("CHAIN_ADMIN") && (req.Role is "CHAIN_ADMIN" or "PROPERTY_MANAGER" || !req.PropertyId.HasValue || !Ops.HasScope(actor, req.PropertyId.Value))) return Results.Forbid();
+    if (string.IsNullOrWhiteSpace(req.FullName) || string.IsNullOrWhiteSpace(req.Email) || !req.Email.Contains('@') || string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
         return Ops.Fail("Thông tin tài khoản không hợp lệ (mật khẩu tối thiểu 8 ký tự)");
     var email = req.Email.Trim().ToLowerInvariant();
     if (await db.Users.AnyAsync(x => x.Email == email)) return Ops.Conflict("Email đã đăng ký");
-    if (!await db.Properties.AnyAsync(x => x.Id == req.PropertyId)) return Ops.Fail("Khách sạn không tồn tại");
+    if (req.PropertyId.HasValue && !await db.Properties.AnyAsync(x => x.Id == req.PropertyId.Value)) return Ops.Fail("Khách sạn không tồn tại");
     var item = new AppUser { FullName = req.FullName.Trim(), Email = email, Role = req.Role, PropertyId = req.PropertyId };
     item.PasswordHash = hasher.HashPassword(item, req.Password);
     db.Users.Add(item); await db.SaveChangesAsync();
-    await Ops.Log(db, actor, req.PropertyId, "USER_CREATE", "AppUser", item.Id);
-    return Results.Ok(new { item.Id, item.FullName, item.Email, item.Role, item.PropertyId });
+    var auditPropertyId = item.PropertyId ?? await db.Properties.OrderBy(x => x.Id).Select(x => x.Id).FirstAsync();
+    await Ops.Log(db, actor, auditPropertyId, "USER_CREATE", "AppUser", item.Id);
+    return Results.Ok(new { item.Id, item.FullName, item.Email, item.Role, Department = Ops.DepartmentName(item.Role), item.PropertyId, item.IsActive });
+});
+api.MapPatch("/users/{id:int}", async (int id, UserUpdateInput req, ClaimsPrincipal actor, PmsDbContext db, IPasswordHasher<AppUser> hasher) => {
+    if (!Ops.CanManage(actor)) return Results.Forbid();
+    var item = await db.Users.FirstOrDefaultAsync(x => x.Id == id);
+    if (item == null) return Results.NotFound();
+    if (item.PropertyId.HasValue ? !Ops.HasScope(actor, item.PropertyId.Value) : !actor.IsInRole("CHAIN_ADMIN")) return Results.Forbid();
+    if (id == Ops.UserId(actor) && (req.Role != item.Role || req.PropertyId != item.PropertyId || !req.IsActive))
+        return Ops.Conflict("Không thể thay đổi vai trò, cơ sở hoặc khóa tài khoản đang đăng nhập");
+    if (!Ops.IsValidRole(req.Role) || (req.Role == "CHAIN_ADMIN" && (!actor.IsInRole("CHAIN_ADMIN") || req.PropertyId != null)) ||
+        (req.Role != "CHAIN_ADMIN" && !req.PropertyId.HasValue)) return Ops.Fail("Vai trò hoặc cơ sở không hợp lệ");
+    if (!actor.IsInRole("CHAIN_ADMIN") && (req.Role is "CHAIN_ADMIN" or "PROPERTY_MANAGER" || !req.PropertyId.HasValue || !Ops.HasScope(actor, req.PropertyId.Value))) return Results.Forbid();
+    if (string.IsNullOrWhiteSpace(req.FullName) || string.IsNullOrWhiteSpace(req.Email) || !req.Email.Contains('@')) return Ops.Fail("Họ tên hoặc email không hợp lệ");
+    var email = req.Email.Trim().ToLowerInvariant();
+    if (await db.Users.AnyAsync(x => x.Id != id && x.Email == email)) return Ops.Conflict("Email đã đăng ký");
+    if (req.PropertyId.HasValue && !await db.Properties.AnyAsync(x => x.Id == req.PropertyId.Value)) return Ops.Fail("Khách sạn không tồn tại");
+    item.FullName = req.FullName.Trim(); item.Email = email; item.Role = req.Role;
+    item.PropertyId = req.Role == "CHAIN_ADMIN" ? null : req.PropertyId;
+    item.IsActive = req.IsActive;
+    if (!string.IsNullOrWhiteSpace(req.Password)) {
+        if (req.Password.Length < 8) return Ops.Fail("Mật khẩu tối thiểu 8 ký tự");
+        item.PasswordHash = hasher.HashPassword(item, req.Password);
+    }
+    await db.SaveChangesAsync();
+    var auditPropertyId = item.PropertyId ?? await db.Properties.OrderBy(x => x.Id).Select(x => x.Id).FirstAsync();
+    await Ops.Log(db, actor, auditPropertyId, "USER_UPDATE", "AppUser", item.Id);
+    return Results.Ok(new { item.Id, item.FullName, item.Email, item.Role, Department = Ops.DepartmentName(item.Role), item.PropertyId, item.IsActive });
 });
 api.MapGet("/dashboard", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.HasScope(user, propertyId)) return Results.Forbid();
@@ -171,7 +203,7 @@ api.MapPatch("/rooms/{roomId:int}/housekeeping", async (int roomId, Housekeeping
     return Results.Ok(room);
 });
 api.MapPatch("/rooms/{roomId:int}/maintenance", async (int roomId, MaintenanceInput req, ClaimsPrincipal user, PmsDbContext db) => {
-    if (!Ops.CanManage(user)) return Results.Forbid();
+    if (!Ops.CanManage(user) && !user.IsInRole("MAINTENANCE_AGENT")) return Results.Forbid();
     var room = await db.Rooms.FindAsync(roomId);
     if (room == null) return Results.NotFound();
     if (!Ops.HasScope(user, room.PropertyId)) return Results.Forbid();
@@ -378,7 +410,7 @@ api.MapPost("/shifts/open", async (ShiftOpenInput req, ClaimsPrincipal user, Pms
 });
 api.MapPost("/shifts/{id:int}/close", async (int id, ShiftCloseInput req, ClaimsPrincipal user, PmsDbContext db) => {
     var shift = await db.Shifts.FindAsync(id); if (shift == null) return Results.NotFound();
-    if (!Ops.HasScope(user, shift.PropertyId) || (shift.UserId != Ops.UserId(user) && !Ops.CanManage(user))) return Results.Forbid();
+    if (!Ops.HasScope(user, shift.PropertyId) || (shift.UserId != Ops.UserId(user) && !Ops.CanManageFinance(user))) return Results.Forbid();
     if (shift.Status != "OPEN" || req.ClosingAmount < 0) return Ops.Conflict("Ca đã khóa hoặc số tiền không hợp lệ");
     shift.Status = "CLOSED"; shift.ClosingAmount = req.ClosingAmount; shift.Note = req.Note; shift.ClosedAtUtc = DateTime.UtcNow;
     await db.SaveChangesAsync(); await Ops.Log(db, user, shift.PropertyId, "SHIFT_CLOSE", "CashShift", shift.Id);
@@ -477,7 +509,8 @@ app.Run();
 
 public record LoginRequest(string Email, string Password);
 public record PropertyInput(string Code, string Name, string? City, string? Address, string? Phone);
-public record UserInput(int PropertyId, string FullName, string Email, string Password, string Role);
+public record UserInput(int? PropertyId, string FullName, string Email, string Password, string Role);
+public record UserUpdateInput(int? PropertyId, string FullName, string Email, string? Password, string Role, bool IsActive);
 public record RoomTypeInput(int PropertyId, string Code, string Name, int Capacity, decimal BaseRate);
 public record RoomInput(int PropertyId, int RoomTypeId, string Number, int Floor);
 public record HousekeepingInput(string Status);
@@ -497,10 +530,36 @@ public record AgencyInput(int PropertyId, string Code, string Name, decimal Comm
 
 public static class Ops
 {
+    private static readonly string[] DepartmentRoles = ["FRONT_DESK_AGENT", "SALES_AGENT", "HOUSEKEEPING_AGENT", "MAINTENANCE_AGENT", "ACCOUNTING_AGENT"];
     public static int UserId(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
     public static int? UserProperty(ClaimsPrincipal user) => int.TryParse(user.FindFirstValue("propertyId"), out var id) ? id : null;
     public static bool HasScope(ClaimsPrincipal user, int propertyId) => propertyId > 0 && (UserProperty(user) == null || UserProperty(user) == propertyId);
     public static bool CanManage(ClaimsPrincipal user) => user.IsInRole("CHAIN_ADMIN") || user.IsInRole("PROPERTY_MANAGER");
+    public static bool CanManageFinance(ClaimsPrincipal user) => CanManage(user) || user.IsInRole("ACCOUNTING_AGENT");
+    public static bool IsValidRole(string role) => role is "CHAIN_ADMIN" or "PROPERTY_MANAGER" || DepartmentRoles.Contains(role);
+    public static string DepartmentName(string role) => role switch {
+        "CHAIN_ADMIN" => "Quản trị toàn chuỗi", "PROPERTY_MANAGER" => "Quản lý khách sạn", "FRONT_DESK_AGENT" => "Lễ tân",
+        "SALES_AGENT" => "Kinh doanh", "HOUSEKEEPING_AGENT" => "Buồng phòng", "MAINTENANCE_AGENT" => "Bảo trì",
+        "ACCOUNTING_AGENT" => "Kế toán", _ => "Chưa phân loại"
+    };
+    public static async ValueTask<object?> DepartmentAccess(EndpointFilterInvocationContext context, EndpointFilterDelegate next) {
+        var user = context.HttpContext.User;
+        if (user.IsInRole("CHAIN_ADMIN") || user.IsInRole("PROPERTY_MANAGER") || user.IsInRole("FRONT_DESK_AGENT")) return await next(context);
+        var role = user.FindFirstValue(ClaimTypes.Role) ?? "";
+        var path = context.HttpContext.Request.Path.Value?.TrimEnd('/').ToLowerInvariant() ?? "";
+        var method = context.HttpContext.Request.Method;
+        var commonReads = method == "GET" && new[] { "/api/properties", "/api/dashboard", "/api/rooms", "/api/room-types" }.Contains(path);
+        var allowed = role switch {
+            "SALES_AGENT" => commonReads || (method == "GET" && new[] { "/api/availability", "/api/guests", "/api/reservations", "/api/agencies", "/api/rate-plans" }.Contains(path)) ||
+                (method == "POST" && (path is "/api/reservations" or "/api/group-bookings" || Regex.IsMatch(path, @"^/api/reservations/\d+/(cancel|deposit)$"))),
+            "HOUSEKEEPING_AGENT" => commonReads || (method == "PATCH" && Regex.IsMatch(path, @"^/api/rooms/\d+/housekeeping$")),
+            "MAINTENANCE_AGENT" => commonReads || (method == "PATCH" && Regex.IsMatch(path, @"^/api/rooms/\d+/maintenance$")),
+            "ACCOUNTING_AGENT" => commonReads || (method == "GET" && (new[] { "/api/reservations", "/api/stays", "/api/services", "/api/shifts", "/api/agencies", "/api/reports/summary", "/api/reports/chain", "/api/reports/stock", "/api/vouchers", "/api/debts", "/api/daily-closes" }.Contains(path) || Regex.IsMatch(path, @"^/api/(stays/\d+/folio|shifts/\d+/reconcile)$"))) ||
+                (method == "POST" && (path is "/api/shifts/open" or "/api/vouchers" or "/api/daily-closes" || Regex.IsMatch(path, @"^/api/(shifts/\d+/close|reservations/\d+/deposit|stays/\d+/(payments|checkout))$"))),
+            _ => false
+        };
+        return allowed ? await next(context) : Results.Forbid();
+    }
     public static IResult Fail(string msg) => Results.BadRequest(new { message = msg });
     public static IResult Conflict(string msg) => Results.Conflict(new { message = msg });
     public static Task<bool> IsBooked(PmsDbContext db, int roomId, DateOnly start, DateOnly end) =>
@@ -512,14 +571,22 @@ public static class Ops
     public static bool ValidIdempotency(string? key) => Guid.TryParse(key, out _);
     public static async Task<bool> LockRoom(PmsDbContext db, int roomId) {
         // A room row is the serialization point for booking/waitlist/group assignments.
+        if (db.Database.IsNpgsql())
+            return await db.Database.SqlQuery<int>($"SELECT id AS \"Value\" FROM rooms WHERE id = {roomId} FOR UPDATE").FirstOrDefaultAsync() != 0;
         return await db.Database.SqlQuery<int>($"SELECT id AS Value FROM dbo.rooms WITH (UPDLOCK, HOLDLOCK) WHERE id = {roomId}").FirstOrDefaultAsync() != 0;
     }
     public static async Task<bool> LockService(PmsDbContext db, int serviceId) {
         // Prevent concurrent stock decrements from reading the same old balance.
+        if (db.Database.IsNpgsql())
+            return await db.Database.SqlQuery<int>($"SELECT id AS \"Value\" FROM services WHERE id = {serviceId} FOR UPDATE").FirstOrDefaultAsync() != 0;
         return await db.Database.SqlQuery<int>($"SELECT id AS Value FROM dbo.services WITH (UPDLOCK, HOLDLOCK) WHERE id = {serviceId}").FirstOrDefaultAsync() != 0;
     }
     public static async Task LockReservation(PmsDbContext db, int reservationId) {
         // The UPDLOCK lock is kept until COMMIT, serializing all financial writers per folio.
+        if (db.Database.IsNpgsql()) {
+            await db.Database.SqlQuery<int>($"SELECT id AS \"Value\" FROM reservations WHERE id = {reservationId} FOR UPDATE").SingleAsync();
+            return;
+        }
         await db.Database.SqlQuery<int>($"SELECT id AS Value FROM dbo.reservations WITH (UPDLOCK, HOLDLOCK) WHERE id = {reservationId}").SingleAsync();
     }
     public static async Task<IResult> RecordPayment(PmsDbContext db, ClaimsPrincipal user, int propertyId, int reservationId, PaymentInput req, string kind) {
