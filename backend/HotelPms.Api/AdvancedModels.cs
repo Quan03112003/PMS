@@ -190,6 +190,11 @@ public sealed class NightAuditLog
     public DateTime? ReopenedAtUtc { get; set; }
     public int? ReopenedByUserId { get; set; }
     [MaxLength(500)] public string? ReopenReason { get; set; }
+    public int RoomsSold { get; set; }
+    public int RoomsAvailable { get; set; }
+    [Precision(6, 2)] public decimal OccupancyPercent { get; set; }
+    [Precision(18, 2)] public decimal Adr { get; set; }
+    [Precision(18, 2)] public decimal Revpar { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 // Draft only: issuing requires a contracted e-invoice provider adapter (V6).

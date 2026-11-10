@@ -61,7 +61,7 @@ app.MapGet("/api/health/ready", async (PmsDbContext db, ILogger<PmsDbContext> lo
     timeout.CancelAfter(TimeSpan.FromSeconds(5));
     try {
         await db.Database.ExecuteSqlRawAsync(
-            "SELECT p.time_zone_id, r.rate_plan_snapshot, a.id, t.id, h.id, e.id, cc.id, cm.id, cb.fingerprint, cl.id, g.title, rt.weekday_rate, ht.id, dn.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e, channel_connections cc, channel_room_mappings cm, channel_bookings cb, channel_sync_logs cl, guests g, room_types rt, housekeeping_tasks ht, desk_notes dn WHERE 1 = 0",
+            "SELECT p.time_zone_id, r.rate_plan_snapshot, r.deposit_required_amount, a.id, t.id, h.id, e.id, cc.id, cm.id, cb.fingerprint, cl.id, g.title, rt.weekday_rate, ht.id, dn.id, mv.id, ge.id, bn.id, hd.id, nl.id, rf.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e, channel_connections cc, channel_room_mappings cm, channel_bookings cb, channel_sync_logs cl, guests g, room_types rt, housekeeping_tasks ht, desk_notes dn, room_transfer_histories mv, group_membership_events ge, booking_note_types bn, reservation_holds hd, night_audit_lines nl, payment_refunds rf WHERE 1 = 0",
             timeout.Token);
         return Results.Ok(new { status = "ready", database = "ok" });
     } catch (Exception ex) {
@@ -216,9 +216,13 @@ api.MapPatch("/rooms/{roomId:int}/housekeeping", async (int roomId, Housekeeping
     if (!new[] {"DIRTY", "CLEAN", "INSPECTED"}.Contains(req.Status)) return Ops.Fail("Trạng thái phòng không hợp lệ");
     room.HousekeepingStatus = req.Status;
     var openTask = await db.HousekeepingTasks.Where(t => t.RoomId == room.Id && t.Status != "FINISH").OrderByDescending(t => t.Id).FirstOrDefaultAsync();
+    if (req.Status == "INSPECTED" && openTask != null && await db.HousekeepingTaskItems.AnyAsync(i => i.TaskId == openTask.Id && i.IsRequired && !i.IsDone))
+        return Ops.Fail("Còn hạng mục bắt buộc chưa xong, chưa nghiệm thu");
+    if (req.Status == "INSPECTED" && openTask != null && await db.HousekeepingTaskItems.AnyAsync(i => i.TaskId == openTask.Id) && !Ops.CanManage(user))
+        return Ops.Fail("Chỉ quản lý nghiệm thu phòng");
     if (req.Status == "DIRTY" && openTask == null) {
         var inHouse = await db.Reservations.AnyAsync(r => r.RoomId == room.Id && r.Status == "CHECKED_IN");
-        db.HousekeepingTasks.Add(new HousekeepingTask { PropertyId = room.PropertyId, RoomId = room.Id, Kind = inHouse ? "STAY" : "CHECKOUT", Status = "NEW" });
+        await V5Closeout.EnsureCleaningTask(db, room, inHouse ? "STAY" : "CHECKOUT");
     } else if (req.Status == "CLEAN" && openTask != null) {
         openTask.Status = "PENDING"; openTask.FinishedAtUtc = DateTime.UtcNow;
     } else if (req.Status == "INSPECTED" && openTask != null) {
@@ -243,7 +247,9 @@ api.MapGet("/housekeeping-tasks", async (int propertyId, ClaimsPrincipal user, P
     var rows = await (from t in db.HousekeepingTasks join room in db.Rooms on t.RoomId equals room.Id
         where t.PropertyId == propertyId orderby t.Id descending
         select new { t.Id, t.RoomId, RoomNumber = room.Number, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note }).Take(80).ToListAsync();
-    return Results.Ok(rows);
+    var ids = rows.Select(x => x.Id).ToArray();
+    var items = await db.HousekeepingTaskItems.Where(i => ids.Contains(i.TaskId)).ToListAsync();
+    return Results.Ok(rows.Select(t => new { t.Id, t.RoomId, t.RoomNumber, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note, items = items.Where(i => i.TaskId == t.Id).Select(i => new { i.Id, i.ChecklistCode, i.Label, i.IsRequired, i.IsDone }) }));
 });
 api.MapPatch("/housekeeping-tasks/{id:int}", async (int id, HousekeepingTaskInput req, ClaimsPrincipal user, PmsDbContext db) => {
     var task = await db.HousekeepingTasks.FindAsync(id);
@@ -292,9 +298,12 @@ api.MapPost("/pricing/room-quote", async (RoomCardQuoteRequest req, ClaimsPrinci
 api.MapGet("/availability", async (int propertyId, DateOnly startDate, DateOnly endDate, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.HasScope(user, propertyId)) return Results.Forbid();
     if (startDate >= endDate) return Ops.Fail("Ngày trả phải sau ngày nhận");
+    await db.ReservationHolds.Where(h => h.PropertyId == propertyId && h.Status == "ACTIVE" && h.ExpiresAtUtc <= DateTime.UtcNow)
+        .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, "EXPIRED").SetProperty(h => h.ReleasedAtUtc, DateTime.UtcNow));
     var rooms = await (from room in db.Rooms join type in db.RoomTypes on room.RoomTypeId equals type.Id
         where room.PropertyId == propertyId && !room.IsOutOfOrder && (startDate > DateOnly.FromDateTime(DateTime.Today) || room.HousekeepingStatus == "INSPECTED") &&
-        !db.Reservations.Any(r => r.RoomId == room.Id && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN") && r.CheckInDate < endDate && r.CheckOutDate > startDate)
+        !db.Reservations.Any(r => r.RoomId == room.Id && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN") && r.CheckInDate < endDate && r.CheckOutDate > startDate) &&
+        !db.ReservationHolds.Any(h => h.RoomId == room.Id && h.Status == "ACTIVE" && h.ExpiresAtUtc > DateTime.UtcNow && h.CheckInDate < endDate && h.CheckOutDate > startDate)
         orderby room.Floor, room.Number select new { room.Id, room.Number, room.Floor, room.RoomTypeId, RoomTypeName = type.Name, type.BaseRate, type.WeekdayRate, type.WeekendRate, type.HourlyRate, type.ExtraHourRate, type.ExtraPersonRate, type.Capacity }).ToListAsync();
     return Results.Ok(rooms);
 });
@@ -311,6 +320,8 @@ api.MapGet("/reservations", async (int propertyId, string? status, ClaimsPrincip
         join room in db.Rooms on r.RoomId equals room.Id where r.PropertyId == propertyId
         select new { r.Id, r.Code, r.PropertyId, r.RoomId, r.GuestId, g.FullName, g.Phone, RoomNumber = room.Number,
             r.CheckInDate, r.CheckOutDate, r.NightlyRate, r.Adults, r.Children, r.Status, r.BookingSource, r.BookingMode, r.GroupCode, r.Note, r.CreatedAtUtc,
+            r.DepositRequiredAmount, r.DepositDueAtUtc,
+            DepositReceived = db.Payments.Where(p => p.ReservationId == r.Id && p.Kind == "DEPOSIT").Sum(p => (decimal?)p.Amount) ?? 0,
             StayId = db.Stays.Where(s => s.ReservationId == r.Id).Select(s => (int?)s.Id).FirstOrDefault() };
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
     return Results.Ok(await query.OrderByDescending(x => x.CreatedAtUtc).Take(250).ToListAsync());
@@ -324,6 +335,7 @@ api.MapPost("/reservations", async (ReservationInput req, ClaimsPrincipal user, 
     var room = await db.Rooms.FirstOrDefaultAsync(x => x.Id == req.RoomId && x.PropertyId == req.PropertyId);
     if (room == null || room.IsOutOfOrder || (req.CheckInDate <= DateOnly.FromDateTime(DateTime.Today) && room.HousekeepingStatus != "INSPECTED")) return Ops.Conflict("Phòng không sẵn sàng bán");
     if (await Ops.IsBooked(db, room.Id, req.CheckInDate, req.CheckOutDate)) return Ops.Conflict("Phòng đã có đặt phòng trùng khoảng ngày");
+    if (await V5Closeout.ActiveHold(db, room.Id, req.CheckInDate, req.CheckOutDate)) return Ops.Conflict("Phòng đang được giữ tạm");
     var mode = req.BookingMode ?? "OVERNIGHT";
     if (mode is not ("OVERNIGHT" or "DAY_USE" or "HOURLY")) return Ops.Fail("Loại lưu trú không hợp lệ");
     var roomType = await db.RoomTypes.FirstAsync(x => x.Id == room.RoomTypeId);
@@ -346,7 +358,18 @@ api.MapPost("/reservations", async (ReservationInput req, ClaimsPrincipal user, 
         NightlyRate = roomUnit, BookingSource = req.BookingSource ?? "DIRECT", BookingMode = mode, AgencyId = req.AgencyId,
         RatePlanId = plan?.Id, RatePlanSnapshot = RoomCardPricing.Serialize(plan == null ? "ROOM_CARD" : "RATE_PLAN", mode, lines, roomType, plan, req.NightlyRate),
         GroupCode = req.GroupCode, Note = req.Note, Status = "CONFIRMED" };
+    var requiredNoteTypes = await db.BookingNoteTypes.Where(t => t.IsActive && t.IsRequired && t.PropertyId == req.PropertyId).Select(t => t.Id).ToListAsync();
+    var providedNotes = req.Notes ?? [];
+    if (requiredNoteTypes.Any(typeId => !providedNotes.Any(n => n.NoteTypeId == typeId && !string.IsNullOrWhiteSpace(n.NoteText))))
+        return Ops.Fail("Thiếu ghi chú bắt buộc trước khi xác nhận phiếu");
     db.Reservations.Add(item); await db.SaveChangesAsync();
+    foreach (var note in providedNotes.Where(n => !string.IsNullOrWhiteSpace(n.NoteText)))
+    {
+        if (!await db.BookingNoteTypes.AnyAsync(t => t.Id == note.NoteTypeId && t.IsActive && (t.PropertyId == null || t.PropertyId == req.PropertyId)))
+            return Ops.Fail("Loại ghi chú không hợp lệ");
+        db.ReservationNotes.Add(new ReservationNote { ReservationId = item.Id, NoteTypeId = note.NoteTypeId, NoteText = note.NoteText!.Trim(), CreatedByUserId = Ops.UserId(user) });
+    }
+    await db.SaveChangesAsync();
     await Ops.Log(db, user, req.PropertyId, "RESERVATION_CREATE", "Reservation", item.Id, item.Code);
     await tx.CommitAsync();
     return Results.Ok(new { item.Id, item.Code, item.Status });
@@ -443,7 +466,8 @@ api.MapGet("/stays/{stayId:int}/folio", async (int stayId, ClaimsPrincipal user,
     if (!Ops.HasScope(user, details.PropertyId)) return Results.Forbid();
     var charges = await db.Charges.Where(x => x.ReservationId == details.ReservationId).OrderBy(x => x.PostedAtUtc).ToListAsync();
     var payments = await db.Payments.Where(x => x.ReservationId == details.ReservationId).OrderBy(x => x.PaidAtUtc).ToListAsync();
-    return Results.Ok(new { details, charges, payments, total = charges.Sum(c => c.Amount), paid = payments.Sum(p => p.Amount),
+    var transfers = await Ops.TransferHistory(db, stayId);
+    return Results.Ok(new { details, charges, payments, transfers, total = charges.Sum(c => c.Amount), paid = payments.Sum(p => p.Amount),
         balance = charges.Sum(c => c.Amount) - payments.Sum(p => p.Amount) });
 });
 api.MapGet("/services", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) =>
@@ -533,13 +557,22 @@ api.MapPost("/stays/{stayId:int}/checkout", async (int stayId, ClaimsPrincipal u
     var r = await db.Reservations.FindAsync(stay.ReservationId); if (r == null) return Results.NotFound();
     if (!Ops.HasScope(user, r.PropertyId)) return Results.Forbid();
     if (stay.Status != "IN_HOUSE") return Ops.Conflict("Khách đã trả phòng");
+    var lockedDay = await Ops.RejectIfLocked(db, r.PropertyId);
+    if (lockedDay != null) return lockedDay;
     var total = await db.Charges.Where(x => x.ReservationId == r.Id).SumAsync(x => (decimal?)x.Amount) ?? 0;
     var paid = await db.Payments.Where(x => x.ReservationId == r.Id).SumAsync(x => (decimal?)x.Amount) ?? 0;
     if (total != paid) return Ops.Conflict($"Chưa cân bằng folio. Còn phải thanh toán: {total - paid:N0} VND");
     stay.Status = "CHECKED_OUT"; stay.CheckedOutAtUtc = DateTime.UtcNow; r.Status = "CHECKED_OUT";
-    var room = await db.Rooms.FindAsync(stay.RoomId); if (room != null) room.HousekeepingStatus = "DIRTY";
+    var room = await db.Rooms.FindAsync(stay.RoomId);
+    if (room != null) { room.HousekeepingStatus = "DIRTY"; await V5Closeout.EnsureCleaningTask(db, room, "CHECKOUT"); }
     await db.SaveChangesAsync(); await Ops.Log(db, user, r.PropertyId, "CHECK_OUT", "Stay", stay.Id);
     await tx.CommitAsync(); return Results.Ok(new { stay.Id, r.Code, stay.Status });
+});
+api.MapGet("/stays/{stayId:int}/transfers", async (int stayId, ClaimsPrincipal user, PmsDbContext db) => {
+    var stay = await (from s in db.Stays join r in db.Reservations on s.ReservationId equals r.Id where s.Id == stayId select new { r.PropertyId }).FirstOrDefaultAsync();
+    if (stay == null) return Results.NotFound();
+    if (!Ops.HasScope(user, stay.PropertyId)) return Results.Forbid();
+    return Results.Ok(await Ops.TransferHistory(db, stayId));
 });
 api.MapPost("/stays/{stayId:int}/transfer", async (int stayId, TransferInput req, ClaimsPrincipal user, PmsDbContext db) => {
     await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -548,14 +581,67 @@ api.MapPost("/stays/{stayId:int}/transfer", async (int stayId, TransferInput req
     if (!Ops.HasScope(user, r.PropertyId)) return Results.Forbid();
     if (stay.Status != "IN_HOUSE") return Ops.Conflict("Chỉ đổi phòng cho khách đang ở");
     if (stay.RoomId == req.NewRoomId) return Ops.Fail("Phòng mới phải khác phòng hiện tại");
+    var reason = req.ReasonCode?.Trim().ToUpperInvariant() ?? "";
+    if (!Ops.TransferReasons.Contains(reason)) return Ops.Fail("Chọn lý do đổi phòng");
+    var note = Ops.TrimOrNull(req.ReasonNote);
+    if (note != null && note.Length > 200) return Ops.Fail("Ghi chú tối đa 200 ký tự");
+    if (reason == "OTHER" && note == null) return Ops.Fail("Lý do khác cần ghi chú");
     var newRoom = await db.Rooms.FirstOrDefaultAsync(x => x.Id == req.NewRoomId && x.PropertyId == r.PropertyId);
-    if (newRoom == null || newRoom.IsOutOfOrder || newRoom.HousekeepingStatus != "INSPECTED") return Ops.Conflict("Phòng đích không sẵn sàng");
-    if (await Ops.IsBooked(db, newRoom.Id, DateOnly.FromDateTime(DateTime.Today), r.CheckOutDate)) return Ops.Conflict("Phòng đích bị trùng lịch");
-    var oldRoom = await db.Rooms.FindAsync(stay.RoomId);
-    if (oldRoom != null) oldRoom.HousekeepingStatus = "DIRTY";
-    var previous = stay.RoomId; stay.RoomId = newRoom.Id; r.RoomId = newRoom.Id;
-    await db.SaveChangesAsync(); await Ops.Log(db, user, r.PropertyId, "ROOM_TRANSFER", "Stay", stay.Id, $"{previous} -> {newRoom.Id}");
-    await tx.CommitAsync(); return Results.Ok(new { stay.Id, NewRoomNumber = newRoom.Number });
+    var oldRoom = await db.Rooms.FirstOrDefaultAsync(x => x.Id == stay.RoomId);
+    var newType = newRoom == null ? null : await db.RoomTypes.FirstOrDefaultAsync(x => x.Id == newRoom.RoomTypeId);
+    if (newRoom == null || oldRoom == null || newType == null || newRoom.IsOutOfOrder || newRoom.HousekeepingStatus != "INSPECTED") return Ops.Conflict("Phòng đích không sẵn sàng");
+    var zoneId = await db.Properties.Where(x => x.Id == r.PropertyId).Select(x => x.TimeZoneId).FirstAsync();
+    TimeZoneInfo zone;
+    try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(zoneId) ? "Asia/Ho_Chi_Minh" : zoneId); }
+    catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { zone = TimeZoneInfo.CreateCustomTimeZone("VN", TimeSpan.FromHours(7), "VN", "VN"); }
+    var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone));
+    var windowEnd = r.CheckOutDate > today ? r.CheckOutDate : today.AddDays(1);
+    await Ops.LockReservation(db, r.Id);
+    foreach (var roomId in new[] { oldRoom.Id, newRoom.Id }.OrderBy(x => x))
+        if (!await Ops.LockRoom(db, roomId)) return Ops.Conflict("Phòng không tồn tại");
+    await db.Entry(newRoom).ReloadAsync();
+    if (newRoom.IsOutOfOrder || newRoom.HousekeepingStatus != "INSPECTED") return Ops.Conflict("Phòng đích không sẵn sàng");
+    if (await db.Stays.AnyAsync(x => x.RoomId == newRoom.Id && x.Id != stay.Id && x.Status == "IN_HOUSE")) return Ops.Conflict("Phòng đích đang có khách");
+    if (await db.Reservations.AnyAsync(x => x.Id != r.Id && x.RoomId == newRoom.Id && (x.Status == "CONFIRMED" || x.Status == "CHECKED_IN") && x.CheckInDate < windowEnd && x.CheckOutDate > today))
+        return Ops.Conflict("Phòng đích bị trùng lịch");
+    var oldRate = r.NightlyRate;
+    var newRate = oldRate;
+    var delta = 0m;
+    if (!req.KeepPrice)
+    {
+        if (!Ops.CanManage(user)) return Ops.Fail("Chỉ quản lý được bỏ giá đã khóa khi đổi phòng");
+        var from = today > r.CheckInDate ? today : r.CheckInDate;
+        decimal oldRemaining;
+        if (r.BookingMode == "OVERNIGHT")
+        {
+            var stayed = RoomCardPricing.ExtendNights(r.RatePlanSnapshot, from, r.CheckOutDate, r.Adults, r.Children);
+            var nights = Math.Max(0, r.CheckOutDate.DayNumber - from.DayNumber);
+            oldRemaining = stayed.Count > 0 ? stayed.Sum(x => x.Amount) : oldRate * nights;
+        }
+        else oldRemaining = RoomCardPricing.LockedTotal(r.RatePlanSnapshot) is var locked && locked > 0 ? locked : oldRate;
+        var quoteStart = r.BookingMode == "OVERNIGHT" && from < r.CheckOutDate ? from : r.CheckInDate;
+        var quoteEnd = r.CheckOutDate > quoteStart ? r.CheckOutDate : quoteStart.AddDays(1);
+        var (lines, unit) = RoomCardPricing.Build(newType, null, r.BookingMode, quoteStart, quoteEnd, r.Adults, r.Children, null, null);
+        var quoted = r.BookingMode == "OVERNIGHT" && from >= r.CheckOutDate ? 0 : lines.Sum(x => x.Amount);
+        delta = quoted - oldRemaining;
+        newRate = unit;
+        if (delta != 0)
+            db.Charges.Add(new FolioCharge { ReservationId = r.Id, Category = "ROOM", Description = $"Chênh lệch đổi phòng {oldRoom.Number} sang {newRoom.Number}", Quantity = 1, UnitPrice = delta, Amount = delta });
+        r.NightlyRate = newRate;
+        r.RatePlanSnapshot = RoomCardPricing.RetargetCard(r.RatePlanSnapshot, newType, r.BookingMode, r.CheckInDate, r.CheckOutDate, r.Adults, r.Children);
+    }
+    var now = DateTime.UtcNow;
+    db.RoomTransfers.Add(new RoomTransferHistory {
+        PropertyId = r.PropertyId, ReservationId = r.Id, StayId = stay.Id, OldRoomId = oldRoom.Id, NewRoomId = newRoom.Id,
+        ReasonCode = reason, ReasonNote = note, OldRate = oldRate, NewRate = newRate, RateDelta = delta, EffectiveAtUtc = now,
+        CreatedByUserId = Ops.UserId(user), ApprovedByUserId = req.KeepPrice ? null : Ops.UserId(user), ApprovedAtUtc = req.KeepPrice ? null : now, CreatedAtUtc = now
+    });
+    oldRoom.HousekeepingStatus = "DIRTY";
+    stay.RoomId = newRoom.Id; r.RoomId = newRoom.Id;
+    await db.SaveChangesAsync();
+    await Ops.Log(db, user, r.PropertyId, "ROOM_TRANSFER", "Stay", stay.Id, $"{oldRoom.Number} -> {newRoom.Number} {reason} {delta}");
+    await tx.CommitAsync();
+    return Results.Ok(new { stay.Id, newRoomNumber = newRoom.Number, oldRate, newRate, rateDelta = delta, keptPrice = req.KeepPrice });
 });
 api.MapPost("/stays/{stayId:int}/extend", async (int stayId, ExtendInput req, ClaimsPrincipal user, PmsDbContext db) => {
     await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -610,6 +696,7 @@ app.MapPmsV2();
 app.MapPricingV4();
 app.MapNightAuditV4();
 app.MapV5Foundation();
+app.MapV5Closeout();
 app.MapOtaIntegration();
 app.Run();
 
@@ -628,14 +715,15 @@ public record RoomCardQuoteRequest(int PropertyId, int RoomId, DateOnly CheckInD
 public record ReservationInput(int PropertyId, int RoomId, string GuestName, string Phone, string? Email,
     DateOnly CheckInDate, DateOnly CheckOutDate, int Adults, int Children, decimal? NightlyRate,
     string? BookingSource, string? GroupCode, string? Note, string? BookingMode = null, int? AgencyId = null, int? RatePlanId = null, int? PlannedHours = null,
-    string? Title = null, string? Gender = null, string? IdDocumentType = null, string? Ethnicity = null, string? Religion = null, string? StayPurpose = null, string? LoyaltyCard = null);
+    string? Title = null, string? Gender = null, string? IdDocumentType = null, string? Ethnicity = null, string? Religion = null, string? StayPurpose = null, string? LoyaltyCard = null,
+    ReservationNoteInput[]? Notes = null);
 public record ServiceInput(int PropertyId, string Code, string Name, string Unit, decimal Price, bool TrackInventory, int StockQuantity);
 public record RestockInput(int Quantity);
 public record PostServiceInput(int ServiceId, int Quantity);
 public record PaymentInput(decimal Amount, string Method, string? Reference, string? IdempotencyKey = null);
 public record ShiftOpenInput(int PropertyId, decimal OpeningAmount);
 public record ShiftCloseInput(decimal ClosingAmount, string? Note);
-public record TransferInput(int NewRoomId);
+public record TransferInput(int NewRoomId, string ReasonCode, string? ReasonNote, bool KeepPrice = true);
 public record ExtendInput(DateOnly NewCheckOutDate);
 public record AgencyInput(int PropertyId, string Code, string Name, decimal CommissionPercent, string? ContactPhone);
 
@@ -643,6 +731,21 @@ public static class Ops
 {
     private static readonly string[] DepartmentRoles = ["FRONT_DESK_AGENT", "SALES_AGENT", "HOUSEKEEPING_AGENT", "MAINTENANCE_AGENT", "ACCOUNTING_AGENT"];
     public static readonly string[] PayMethods = ["CASH", "TRANSFER", "CARD", "MOMO", "VNPAY"];
+    public static readonly string[] TransferReasons = ["GUEST_REQUEST", "UPGRADE", "DOWNGRADE", "MAINTENANCE", "OPERATIONS", "OTHER"];
+    public static string TransferReasonLabel(string code) => code switch {
+        "GUEST_REQUEST" => "Khách yêu cầu", "UPGRADE" => "Nâng hạng", "DOWNGRADE" => "Hạ hạng",
+        "MAINTENANCE" => "Phòng cũ phải sửa", "OPERATIONS" => "Điều phối", "OTHER" => "Lý do khác", _ => code
+    };
+    public static async Task<List<object>> TransferHistory(PmsDbContext db, int stayId) {
+        var rows = await (from h in db.RoomTransfers
+            join oldRoom in db.Rooms on h.OldRoomId equals oldRoom.Id
+            join newRoom in db.Rooms on h.NewRoomId equals newRoom.Id
+            join actor in db.Users on h.CreatedByUserId equals actor.Id
+            where h.StayId == stayId
+            orderby h.EffectiveAtUtc
+            select new { h.EffectiveAtUtc, FromRoom = oldRoom.Number, ToRoom = newRoom.Number, h.ReasonCode, h.ReasonNote, h.OldRate, h.NewRate, h.RateDelta, Actor = actor.FullName }).ToListAsync();
+        return rows.Select(x => (object)new { at = x.EffectiveAtUtc, fromRoom = x.FromRoom, toRoom = x.ToRoom, reason = TransferReasonLabel(x.ReasonCode), note = x.ReasonNote ?? "", oldRate = x.OldRate, newRate = x.NewRate, rateDelta = x.RateDelta, actor = x.Actor }).ToList();
+    }
     public static int UserId(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
     public static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     public static int? UserProperty(ClaimsPrincipal user) => int.TryParse(user.FindFirstValue("propertyId"), out var id) ? id : null;
@@ -665,9 +768,9 @@ public static class Ops
         var allowed = role switch {
             "SALES_AGENT" => commonReads || (method == "GET" && new[] { "/api/availability", "/api/guests", "/api/reservations", "/api/agencies", "/api/rate-plans" }.Contains(path)) ||
                 (method == "POST" && (path is "/api/reservations" or "/api/group-bookings" || Regex.IsMatch(path, @"^/api/reservations/\d+/(cancel|deposit)$"))),
-            "HOUSEKEEPING_AGENT" => commonReads || (method == "PATCH" && Regex.IsMatch(path, @"^/api/rooms/\d+/housekeeping$")),
+            "HOUSEKEEPING_AGENT" => commonReads || (method == "GET" && path == "/api/housekeeping-tasks") || (method == "PATCH" && Regex.IsMatch(path, @"^/api/(rooms/\d+/housekeeping|housekeeping-tasks/\d+|housekeeping-task-items/\d+)$")) || (method == "POST" && Regex.IsMatch(path, @"^/api/housekeeping-tasks/\d+/(submit|media)$")),
             "MAINTENANCE_AGENT" => commonReads || (method == "PATCH" && Regex.IsMatch(path, @"^/api/rooms/\d+/maintenance$")),
-            "ACCOUNTING_AGENT" => commonReads || (method == "GET" && (new[] { "/api/reservations", "/api/stays", "/api/services", "/api/shifts", "/api/agencies", "/api/reports/summary", "/api/reports/chain", "/api/reports/stock", "/api/vouchers", "/api/debts", "/api/daily-closes" }.Contains(path) || Regex.IsMatch(path, @"^/api/(stays/\d+/folio|shifts/\d+/reconcile)$"))) ||
+            "ACCOUNTING_AGENT" => commonReads || (method == "GET" && (new[] { "/api/reservations", "/api/stays", "/api/services", "/api/shifts", "/api/agencies", "/api/reports/summary", "/api/reports/chain", "/api/reports/stock", "/api/reports/stock-card", "/api/reports/cash-ledger", "/api/reports/receipts", "/api/vouchers", "/api/debts", "/api/daily-closes" }.Contains(path) || Regex.IsMatch(path, @"^/api/(stays/\d+/folio|shifts/\d+/reconcile)$"))) ||
                 (method == "POST" && (path is "/api/shifts/open" or "/api/vouchers" or "/api/daily-closes" || Regex.IsMatch(path, @"^/api/(shifts/\d+/close|reservations/\d+/deposit|stays/\d+/(payments|checkout))$"))),
             _ => false
         };
@@ -679,6 +782,13 @@ public static class Ops
     public static IResult Conflict(string msg) => Results.Conflict(new { message = msg });
     public static Task<bool> IsBooked(PmsDbContext db, int roomId, DateOnly start, DateOnly end) =>
         db.Reservations.AnyAsync(r => r.RoomId == roomId && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN") && r.CheckInDate < end && r.CheckOutDate > start);
+    public static async Task<IResult?> RejectIfLocked(PmsDbContext db, int propertyId) {
+        var zone = await db.Properties.Where(x => x.Id == propertyId).Select(x => x.TimeZoneId).FirstOrDefaultAsync();
+        var today = V5Closeout.PropertyToday(zone);
+        if (await db.NightAuditLogs.AnyAsync(x => x.PropertyId == propertyId && x.BusinessDate == today && x.Status == "LOCKED"))
+            return Conflict($"Ngày {today:dd/MM/yyyy} đã khóa sổ, không ghi thêm giao dịch");
+        return null;
+    }
     public static async Task Log(PmsDbContext db, ClaimsPrincipal user, int propertyId, string action, string entity, int id, string details = "") {
         db.AuditEvents.Add(new AuditEvent { PropertyId = propertyId, ActorUserId = UserId(user), Action = action, Entity = entity, EntityId = id, Details = details });
         await db.SaveChangesAsync();
@@ -706,6 +816,8 @@ public static class Ops
     }
     public static async Task<IResult> RecordPayment(PmsDbContext db, ClaimsPrincipal user, int propertyId, int reservationId, PaymentInput req, string kind) {
         if (req.Amount <= 0 || req.Amount > 10000000000m) return Fail("Số tiền phải lớn hơn 0 và trong giới hạn");
+        var lockedDay = await RejectIfLocked(db, propertyId);
+        if (lockedDay != null) return lockedDay;
         if (!Ops.PayMethods.Contains(req.Method)) return Fail("Phương thức thanh toán không hợp lệ");
         if (!ValidIdempotency(req.IdempotencyKey)) return Fail("idempotencyKey bắt buộc là UUID để chống ghi trùng giao dịch");
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);

@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, Input, OnChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
+import { openCompanySheet } from './company-sheet';
 
 function day(delta = 0): string {
   const d = new Date(); d.setDate(d.getDate() + delta);
@@ -33,10 +34,20 @@ export class AdvancedComponent implements OnChanges {
   from = day(-7);
   to = day();
   report: any = null;
+  stockCard: any = null;
+  stockName = '';
+  cashCard: any = null;
+  cashKind = 'COLLECT';
+  cashMethod = '';
+  receiptCard: any = null;
+  receiptName = '';
   agencyReport: any = null;
   selectedShift = 0;
   reconcile: any = null;
   selectedGroup = '';
+  attachReservationId = 0;
+  groupCandidates: any[] = [];
+  groupEvents: any[] = [];
   groupRoomOccupants: any[] = [];
   selectedGroupReservation = 0;
   occupantForm: any = { fullName: '', phone: '', nationality: '', identityLast4: '', isPrimary: true };
@@ -59,7 +70,7 @@ export class AdvancedComponent implements OnChanges {
     rates: 'Bảng giá giờ / ngày / đêm', buildings: 'Tòa nhà & phân phòng', stockledger: 'Nhập xuất tồn kho',
     suppliers: 'Nhà cung cấp', retail: 'Bán hàng ngoài phòng', vouchers: 'Phiếu thu – phiếu chi',
     debts: 'Công nợ khách hàng', assets: 'Tài sản khách gửi', dayclose: 'Snapshot chốt ngày',
-    chain: 'Tổng hợp toàn chuỗi', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
+    chain: 'Tổng hợp toàn chuỗi', collections: 'Thu tiền, tạm ứng, trả lại', receipts: 'Phiếu thanh toán', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
     pricingQuote: 'Báo giá & phụ thu',
     adjustmentVouchers: 'Phiếu điều chỉnh folio',
     taxRules: 'Quy tắc thuế',
@@ -73,6 +84,7 @@ export class AdvancedComponent implements OnChanges {
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
   get canManageFinance(): boolean { return this.canManage || this.user?.role === 'ACCOUNTING_AGENT'; }
   get isChainAdmin(): boolean { return this.user?.role === 'CHAIN_ADMIN'; }
+  get hotel(): any { return this.properties?.find((p: any) => p.id === Number(this.propertyId)) || {}; }
   get reportTotals(): any {
     const p = this.report?.properties ?? [];
     return { roomRevenue: p.reduce((a: number, x: any) => a + x.roomRevenue, 0),
@@ -109,12 +121,14 @@ export class AdvancedComponent implements OnChanges {
     if (['waitlist', 'groups', 'buildings'].includes(this.view)) this.fetch(`/rooms?propertyId=${id}`, 'rooms');
     if (['waitlist', 'groups'].includes(this.view)) this.fetch(`/room-types?propertyId=${id}`, 'buildings');
     if (['stockledger', 'retail'].includes(this.view)) this.fetch(`/services?propertyId=${id}`, 'services');
-    if (this.view === 'stockledger') this.fetch(`/suppliers?propertyId=${id}`, 'suppliers');
+    if (this.view === 'stockledger') { this.fetch(`/suppliers?propertyId=${id}`, 'suppliers'); this.loadStockCard(); }
     if (['debts', 'assets', 'transfers'].includes(this.view)) this.fetch(`/stays?propertyId=${id}`, 'stays');
     if (this.view === 'transfers') this.fetch(`/rooms?propertyId=${id}`, 'rooms');
     if (this.view === 'debts') this.fetch(`/checkouts?propertyId=${id}`, 'bookings');
     if (this.view === 'registration') this.fetch(`/reservations?propertyId=${id}`, 'items');
     if (this.view === 'chain') this.loadReport();
+    if (this.view === 'collections') this.loadCash();
+    if (this.view === 'receipts') this.loadReceipts();
     if (this.view === 'agencyReports') this.loadAgencyReport();
     if (this.view === 'shiftReconcile') this.fetch(`/shifts?propertyId=${id}`, 'items');
     if (this.view === 'groups') this.searchRooms();
@@ -183,11 +197,26 @@ export class AdvancedComponent implements OnChanges {
   }
   toggleRoom(id: number): void { this.selectedRooms = this.selectedRooms.includes(id) ? this.selectedRooms.filter(x => x !== id) : [...this.selectedRooms, id]; }
   createGroup(): void { this.submit('/group-bookings', { ...this.form, roomIds: this.selectedRooms, bookingSource: 'DIRECT' }, () => this.selectedRooms = []); }
-  selectGroup(code: string): void { this.selectedGroup = code; this.loadGroupOccupants(); }
+  selectGroup(code: string): void { this.selectedGroup = code; this.attachReservationId = 0; this.loadGroupOccupants(); }
   loadGroupOccupants(): void {
     if (!this.selectedGroup) return;
-    this.api.get<any[]>(`/groups/${encodeURIComponent(this.selectedGroup)}/occupants?propertyId=${this.propertyId}`)
+    const code = encodeURIComponent(this.selectedGroup);
+    this.api.get<any[]>(`/groups/${code}/occupants?propertyId=${this.propertyId}`)
       .subscribe({ next: rows => this.groupRoomOccupants = rows, error: e => this.error = e?.error?.message || 'Không tải được khách đoàn theo phòng' });
+    this.api.get<any[]>(`/groups/${code}/candidates?propertyId=${this.propertyId}`)
+      .subscribe({ next: rows => this.groupCandidates = rows, error: e => this.error = e?.error?.message || 'Không tải được phòng có thể nhập đoàn' });
+    this.api.get<any[]>(`/groups/${code}/membership?propertyId=${this.propertyId}`)
+      .subscribe({ next: rows => this.groupEvents = rows, error: e => this.error = e?.error?.message || 'Không tải được lịch sử đoàn' });
+  }
+  attachToGroup(): void {
+    if (!this.selectedGroup || !this.attachReservationId) { this.error = 'Chọn phòng lẻ cần nhập vào đoàn'; return; }
+    this.submit(`/groups/${encodeURIComponent(this.selectedGroup)}/attach`, { propertyId: this.propertyId, reservationId: +this.attachReservationId },
+      () => { this.attachReservationId = 0; this.loadGroupOccupants(); });
+  }
+  detachFromGroup(id: number): void {
+    if (!this.selectedGroup) return;
+    this.submit(`/groups/${encodeURIComponent(this.selectedGroup)}/detach`, { propertyId: this.propertyId, reservationId: id },
+      () => this.loadGroupOccupants());
   }
   addOccupant(): void {
     if (!this.selectedGroupReservation || !this.occupantForm.fullName?.trim()) { this.error = 'Chọn phòng và nhập tên khách ở thực tế'; return; }
@@ -225,6 +254,33 @@ export class AdvancedComponent implements OnChanges {
   loadReconcile(): void { if (!this.selectedShift) return; this.api.get(`/shifts/${this.selectedShift}/reconcile`)
     .subscribe({next: x => this.reconcile = x, error: e => this.error = e?.error?.message || 'Không đối soát được ca'}); }
   printPdf(): void { window.print(); }
+  loadReceipts(): void {
+    const name = encodeURIComponent(this.receiptName || '');
+    this.api.get(`/reports/receipts?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}&name=${name}`)
+      .subscribe({ next: x => this.receiptCard = x, error: e => this.error = e?.error?.message || 'Không tải được phiếu thanh toán' });
+  }
+  loadCash(): void {
+    const method = encodeURIComponent(this.cashMethod || '');
+    this.api.get(`/reports/cash-ledger?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}&kind=${this.cashKind}&method=${method}`)
+      .subscribe({ next: x => this.cashCard = x, error: e => this.error = e?.error?.message || 'Không tải được báo cáo thu tiền' });
+  }
+  sheetMoney(value: number): string {
+    if (!value) return '';
+    const text = Math.abs(value).toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+    return value < 0 ? `(${text})` : text;
+  }
+  loadStockCard(): void {
+    const name = encodeURIComponent(this.stockName || '');
+    this.api.get(`/reports/stock-card?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}&name=${name}`)
+      .subscribe({ next: x => this.stockCard = x, error: e => this.error = e?.error?.message || 'Không tải được báo cáo nhập xuất tồn' });
+  }
+  vnDate(value: string): string { const [y, m, d] = String(value).slice(0, 10).split('-'); return d && m && y ? `${d}/${m}/${y}` : value; }
+  sheetQty(value: number): string {
+    if (!value) return '';
+    const text = Math.abs(value).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return value < 0 ? `(${text})` : text;
+  }
+  printSheet(id: string): void { openCompanySheet(id); }
   loadReport(): void { this.api.get(`/reports/chain?from=${this.from}&to=${this.to}`).subscribe({ next: x => this.report = x, error: e => this.error = e?.error?.message || 'Không tải được báo cáo' }); }
   exportRegistration(): void {
     this.api.getText(`/reports/registration-csv?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}`).subscribe({ next: txt => {

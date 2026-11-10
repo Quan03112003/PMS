@@ -3,6 +3,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
+import { openCompanySheet } from './company-sheet';
 import { AdvancedComponent } from './advanced.component';
 import { OtaComponent } from './ota.component';
 import { RoadmapComponent } from './roadmap.component';
@@ -52,10 +53,17 @@ export class AppComponent implements OnInit, OnDestroy {
   priceQuote: any = null;
   priceTouched = false;
   deskNotes: any[] = [];
+  closeout: any = { warnings: [], holds: [], notes: [], audits: [], refunds: [], alerts: [], noteTypes: [], integrations: null };
+  depositForm = { reservationId: 0, amount: 0, dueAt: '', policy: 'STANDARD' };
+  noteForm = { reservationId: 0, noteTypeId: 0, text: '' };
+  holdForm = { roomId: 0, guestName: '', phone: '', checkInDate: '', checkOutDate: '', holdMinutes: 30 };
+  auditDate = '';
+  refundForm = { paymentId: 0, amount: 0, reasonCode: 'GUEST', reasonText: '' };
+  reopenReason = '';
   deskNoteText = '';
   roomMenu: any = null;
 
-  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','agencyReports','shiftReconcile','registration','pricingQuote',
+  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','collections','receipts','agencyReports','shiftReconcile','registration','pricingQuote',
     'adjustmentVouchers','taxRules','holidayRates','eInvoices'];
 
   // Branch codes follow the requirement groups (A–I) of docs/LOTUS_PMS_V4_DoiChieu.xlsx.
@@ -66,7 +74,8 @@ export class AppComponent implements OnInit, OnDestroy {
         { id: 'bookings', label: 'Danh sách đặt phòng' },
         { id: 'pricingQuote', label: 'Báo giá & phụ thu' },
         { id: 'waitlist', label: 'Phòng hàng đợi' },
-        { id: 'groups', label: 'Khách đoàn' }
+        { id: 'groups', label: 'Khách đoàn' },
+        { id: 'closeout', label: 'Cọc, giữ phòng, chốt ngày' }
       ] },
       { key: 'A2', code: 'A2', label: 'Lưu trú', children: [
         { id: 'roommap', label: 'Sơ đồ phòng' },
@@ -112,6 +121,8 @@ export class AppComponent implements OnInit, OnDestroy {
     ] },
     { key: 'H', code: 'H', label: 'Báo cáo', icon: 'report', children: [
       { id: 'reports', label: 'Báo cáo doanh thu' },
+      { id: 'receipts', label: 'Phiếu thanh toán' },
+      { id: 'collections', label: 'Thu tiền & tạm ứng' },
       { id: 'chain', label: 'Báo cáo chuỗi' },
       { id: 'dayclose', label: 'Snapshot chốt ngày' }
     ] },
@@ -152,11 +163,11 @@ export class AppComponent implements OnInit, OnDestroy {
   canView(itemId: string): boolean {
     if (this.isManager) return itemId !== 'properties' || this.isChainAdmin;
     const roleViews: Record<string, string[]> = {
-      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests','pricingQuote','ota'],
+      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','closeout','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests','pricingQuote','ota'],
       SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates','pricingQuote','ota','agencyReports'],
       HOUSEKEEPING_AGENT: ['dashboard','roommap','housekeeping'],
       MAINTENANCE_AGENT: ['dashboard','roommap','housekeeping','manageRooms'],
-      ACCOUNTING_AGENT: ['dashboard','bookings','stays','shifts','vouchers','debts','reports','dayclose','shiftReconcile','guests']
+      ACCOUNTING_AGENT: ['dashboard','bookings','closeout','stays','shifts','vouchers','debts','reports','dayclose','shiftReconcile','guests']
     };
     return roleViews[this.user?.role || '']?.includes(itemId) ?? false;
   }
@@ -250,7 +261,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.api.get<any[]>(`/room-types?propertyId=${id}`).subscribe({ next: r => this.roomTypes = r, error: e => this.onError(e) });
     if (['bookings', 'dashboard', 'roommap'].includes(this.view) && this.canView('bookings')) this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
     if (['housekeeping', 'dashboard'].includes(this.view)) this.api.get<any[]>(`/housekeeping-tasks?propertyId=${id}`).subscribe({ next: r => this.housekeepingTasks = r, error: e => this.onError(e) });
-    if (this.view === 'dashboard') this.api.get<any[]>(`/desk-notes?propertyId=${id}`).subscribe({ next: r => this.deskNotes = r, error: e => this.onError(e) });
+    if (this.view === 'dashboard') {
+      this.api.get<any[]>(`/desk-notes?propertyId=${id}`).subscribe({ next: r => this.deskNotes = r, error: e => this.onError(e) });
+      this.api.get<any>(`/operations/alerts?propertyId=${id}`).subscribe({ next: r => this.closeout.alerts = r.alerts || [], error: () => this.closeout.alerts = [] });
+    }
+    if (this.view === 'closeout') this.loadCloseout();
     if (['stays', 'dashboard', 'roommap'].includes(this.view) && this.canView('stays')) this.api.get<any[]>(`/stays?propertyId=${id}`).subscribe({ next: r => this.stays = r, error: e => this.onError(e) });
     if (['services', 'stays'].includes(this.view)) this.api.get<any[]>(`/services?propertyId=${id}`).subscribe({ next: r => this.services = r, error: e => this.onError(e) });
     if (this.view === 'users') this.api.get<any[]>(`/users?propertyId=${id}`).subscribe({ next: r => this.users = r, error: e => this.onError(e) });
@@ -390,8 +405,14 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   extend(): void { this.run(this.api.post(`/stays/${this.folio.details.id}/extend`, { newCheckOutDate: this.form.newCheckOutDate }),
     () => this.openFolio(this.folio.details.id), 'Gia hạn lưu trú thành công'); }
-  transfer(): void { this.run(this.api.post(`/stays/${this.folio.details.id}/transfer`, { newRoomId: Number(this.form.newRoomId) }),
-    () => this.openFolio(this.folio.details.id), 'Đã đổi phòng. Phòng cũ chuyển Chưa dọn.'); }
+  transfer(): void {
+    if (!this.form.newRoomId || !this.form.reasonCode) { this.notice('Chọn phòng mới và lý do', true); return; }
+    if (this.form.reasonCode === 'OTHER' && !String(this.form.reasonNote || '').trim()) { this.notice('Lý do khác cần ghi chú', true); return; }
+    const keepPrice = this.form.keepPrice !== false;
+    this.run(this.api.post(`/stays/${this.folio.details.id}/transfer`, {
+      newRoomId: Number(this.form.newRoomId), reasonCode: this.form.reasonCode, reasonNote: this.form.reasonNote || null, keepPrice
+    }), () => this.openFolio(this.folio.details.id), keepPrice ? 'Đã đổi phòng. Giá đã khóa được giữ nguyên.' : 'Đã đổi phòng và ghi chênh lệch đêm còn lại.');
+  }
   housekeeping(room: any, status: string): void { this.run(this.api.patch(`/rooms/${room.id}/housekeeping`, { status }), undefined, `Phòng ${room.number}: ${this.statusText(status)}`); }
   maintenance(room: any): void {
     if (!this.canMaintain) return;
@@ -429,6 +450,8 @@ export class AppComponent implements OnInit, OnDestroy {
     return { text: '', cls: '' };
   }
   shiftTape(days: number): void { this.tapeStart = shiftIso(this.tapeStart, days); }
+  vnDate(value: string): string { const [y, m, d] = String(value).slice(0, 10).split('-'); return d && m && y ? `${d}/${m}/${y}` : value; }
+  printSheet(id: string): void { openCompanySheet(id); }
   printConfirm(b: any): void {
     const page = window.open('', '_blank', 'noopener,width=760,height=900');
     if (!page) { this.notice('Trình duyệt đang chặn cửa sổ in', true); return; }
@@ -438,6 +461,50 @@ export class AppComponent implements OnInit, OnDestroy {
     page.focus();
     page.print();
   }
+  loadCloseout(): void {
+    const id = this.propertyId;
+    if (!this.auditDate) this.auditDate = localIsoDate(0);
+    if (!this.holdForm.checkInDate) { this.holdForm.checkInDate = localIsoDate(0); this.holdForm.checkOutDate = localIsoDate(1); }
+    this.api.get<any[]>(`/deposits/warnings?propertyId=${id}`).subscribe({ next: r => this.closeout.warnings = r, error: e => this.onError(e) });
+    this.api.get<any>(`/reservation-holds?propertyId=${id}`).subscribe({ next: r => this.closeout.holds = r.holds || [], error: e => this.onError(e) });
+    this.api.get<any[]>(`/booking-note-types?propertyId=${id}`).subscribe({ next: r => this.closeout.noteTypes = r, error: e => this.onError(e) });
+    this.api.get<any[]>(`/night-audit?propertyId=${id}`).subscribe({ next: r => this.closeout.audits = r, error: e => this.onError(e) });
+    this.api.get<any[]>(`/payment-refunds?propertyId=${id}`).subscribe({ next: r => this.closeout.refunds = r, error: e => this.onError(e) });
+    this.api.get<any>(`/operations/alerts?propertyId=${id}`).subscribe({ next: r => this.closeout.alertSummary = r, error: e => this.onError(e) });
+    if (this.isManager) this.api.get<any>('/integrations/readiness').subscribe({ next: r => this.closeout.integrations = r, error: e => this.onError(e) });
+    this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
+  }
+  saveDepositTerms(): void {
+    this.run(this.api.patch(`/reservations/${this.depositForm.reservationId}/deposit-terms`, { amount: +this.depositForm.amount, dueAtUtc: this.depositForm.dueAt ? new Date(this.depositForm.dueAt).toISOString() : null, policyCode: this.depositForm.policy }), () => this.loadCloseout(), 'Đã lưu hạn cọc. Phiếu không bị hủy.');
+  }
+  scanDeposits(): void { this.run(this.api.post(`/deposits/reminders?propertyId=${this.propertyId}`, {}), () => this.loadCloseout(), 'Đã ghi nhắc cọc. Không hủy phiếu.'); }
+  saveNote(): void {
+    this.run(this.api.post(`/reservations/${this.noteForm.reservationId}/notes`, { noteTypeId: +this.noteForm.noteTypeId, noteText: this.noteForm.text }), () => { this.noteForm.text = ''; this.loadNotes(); }, 'Đã lưu ghi chú, bản cũ được giữ');
+  }
+  loadNotes(): void {
+    if (!this.noteForm.reservationId) return;
+    this.api.get<any[]>(`/reservations/${this.noteForm.reservationId}/notes`).subscribe({ next: r => this.closeout.notes = r, error: e => this.onError(e) });
+  }
+  createHold(): void {
+    this.run(this.api.post('/reservation-holds', { propertyId: +this.propertyId, roomId: +this.holdForm.roomId, guestName: this.holdForm.guestName, guestPhone: this.holdForm.phone, checkInDate: this.holdForm.checkInDate, checkOutDate: this.holdForm.checkOutDate, holdMinutes: +this.holdForm.holdMinutes, idempotencyKey: crypto.randomUUID() }), () => this.loadCloseout(), 'Đã giữ phòng');
+  }
+  releaseHold(id: number): void { this.run(this.api.post(`/reservation-holds/${id}/release`, { reason: 'Lễ tân nhả phòng' }), () => this.loadCloseout(), 'Đã nhả phòng'); }
+  convertHold(id: number): void { this.run(this.api.post(`/reservation-holds/${id}/convert`, {}), () => this.loadCloseout(), 'Đã chuyển giữ chỗ thành phiếu'); }
+  runAudit(): void { this.run(this.api.post('/night-audit/run', { propertyId: +this.propertyId, businessDate: this.auditDate }), () => this.loadCloseout(), 'Đã chạy chốt ngày'); }
+  lockAudit(id: number): void { this.run(this.api.post(`/night-audit/${id}/lock`, {}), () => this.loadCloseout(), 'Đã khóa ngày'); }
+  reopenAudit(id: number): void { this.run(this.api.post(`/night-audit/${id}/reopen`, { reason: this.reopenReason }), () => this.loadCloseout(), 'Đã mở lại ngày'); }
+  requestRefund(): void {
+    this.run(this.api.post(`/payments/${this.refundForm.paymentId}/refund-requests`, { amount: +this.refundForm.amount, reasonCode: this.refundForm.reasonCode, reasonText: this.refundForm.reasonText, idempotencyKey: crypto.randomUUID() }), () => this.loadCloseout(), 'Đã lập phiếu hoàn, chờ người khác duyệt');
+  }
+  approveRefund(id: number): void { this.run(this.api.post(`/payment-refunds/${id}/approve`, {}), () => this.loadCloseout(), 'Đã ghi khoản hoàn'); }
+  rejectRefund(id: number): void { this.run(this.api.post(`/payment-refunds/${id}/reject`, { reason: 'Không duyệt' }), () => this.loadCloseout(), 'Đã từ chối phiếu hoàn'); }
+  saveThresholds(occ: string, revenue: string): void {
+    this.run(this.api.patch(`/properties/${this.propertyId}/alert-thresholds`, { lowOccupancyPercent: +occ, lowRevenueAmount: +revenue }), () => this.loadCloseout(), 'Đã lưu ngưỡng cảnh báo');
+  }
+  toggleItem(item: any): void {
+    this.run(this.api.patch(`/housekeeping-task-items/${item.id}`, { isDone: !item.isDone, note: item.note || '' }), undefined, item.isDone ? 'Đã bỏ hạng mục' : 'Đã xong hạng mục');
+  }
+  approveTask(task: any): void { this.run(this.api.post(`/housekeeping-tasks/${task.id}/approve`, {}), undefined, 'Đã nghiệm thu phòng'); }
   saveTask(task: any): void {
     this.run(this.api.patch(`/housekeeping-tasks/${task.id}`, { cleaner1: task.cleaner1, cleaner2: task.cleaner2, cleaner3: task.cleaner3, note: task.note }), undefined, 'Đã lưu phiếu dọn');
   }

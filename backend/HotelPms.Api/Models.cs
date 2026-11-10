@@ -15,6 +15,8 @@ public sealed class Property
     public TimeOnly CheckInTime { get; set; } = new(14, 0);
     public TimeOnly CheckOutTime { get; set; } = new(12, 0);
     [MaxLength(64)] public string TimeZoneId { get; set; } = "Asia/Ho_Chi_Minh"; // IANA id
+    [Precision(5, 2)] public decimal LowOccupancyPercent { get; set; }
+    [Precision(18, 2)] public decimal LowRevenueAmount { get; set; }
     public bool IsActive { get; set; } = true;
 }
 public sealed class RoomType
@@ -80,6 +82,9 @@ public sealed class Reservation
     [MaxLength(30)] public string BookingMode { get; set; } = "OVERNIGHT";
     [MaxLength(30)] public string? GroupCode { get; set; }
     [MaxLength(500)] public string? Note { get; set; }
+    [Precision(18, 2)] public decimal DepositRequiredAmount { get; set; }
+    public DateTime? DepositDueAtUtc { get; set; }
+    [MaxLength(40)] public string? DepositPolicyCode { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 public sealed class Stay
@@ -90,6 +95,36 @@ public sealed class Stay
     public DateTime CheckedInAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? CheckedOutAtUtc { get; set; }
     [MaxLength(20)] public string Status { get; set; } = "IN_HOUSE";
+}
+public sealed class RoomTransferHistory
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int ReservationId { get; set; }
+    public int StayId { get; set; }
+    public int OldRoomId { get; set; }
+    public int NewRoomId { get; set; }
+    [MaxLength(30)] public string ReasonCode { get; set; } = "";
+    [MaxLength(200)] public string? ReasonNote { get; set; }
+    [Precision(18,2)] public decimal OldRate { get; set; }
+    [Precision(18,2)] public decimal NewRate { get; set; }
+    [Precision(18,2)] public decimal RateDelta { get; set; }
+    public DateTime EffectiveAtUtc { get; set; } = DateTime.UtcNow;
+    public int CreatedByUserId { get; set; }
+    public int? ApprovedByUserId { get; set; }
+    public DateTime? ApprovedAtUtc { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+public sealed class GroupMembershipEvent
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int ReservationId { get; set; }
+    [MaxLength(20)] public string Action { get; set; } = "";
+    [MaxLength(30)] public string? OldGroupCode { get; set; }
+    [MaxLength(30)] public string? NewGroupCode { get; set; }
+    public int CreatedByUserId { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 // One booking/group room can have multiple registered occupants; Guest is the group contact.
 public sealed class ReservationOccupant
@@ -113,6 +148,7 @@ public sealed class ServiceItem
     [Precision(18,2)] public decimal Price { get; set; }
     public bool TrackInventory { get; set; }
     public int StockQuantity { get; set; }
+    public int MinStock { get; set; }
     public bool IsActive { get; set; } = true;
 }
 public sealed class FolioCharge
@@ -125,6 +161,8 @@ public sealed class FolioCharge
     public int Quantity { get; set; } = 1;
     [Precision(18,2)] public decimal UnitPrice { get; set; }
     [Precision(18,2)] public decimal Amount { get; set; }
+    public DateOnly? BusinessDate { get; set; }
+    public int? NightAuditLogId { get; set; }
     public DateTime PostedAtUtc { get; set; } = DateTime.UtcNow;
 }
 public sealed class Payment
@@ -195,6 +233,110 @@ public sealed class DeskNote
     public int CreatedByUserId { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
+public sealed class BookingNoteType
+{
+    public int Id { get; set; }
+    public int? PropertyId { get; set; }
+    [MaxLength(40)] public string Code { get; set; } = "";
+    [MaxLength(80)] public string Name { get; set; } = "";
+    public bool IsRequired { get; set; }
+    public bool AllowFreeText { get; set; } = true;
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+}
+public sealed class ReservationNote
+{
+    public int Id { get; set; }
+    public int ReservationId { get; set; }
+    public int NoteTypeId { get; set; }
+    [MaxLength(500)] public string NoteText { get; set; } = "";
+    public int Version { get; set; } = 1;
+    public bool IsCurrent { get; set; } = true;
+    public int CreatedByUserId { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+public sealed class ReservationHold
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int RoomId { get; set; }
+    [MaxLength(150)] public string GuestName { get; set; } = "";
+    [MaxLength(30)] public string? GuestPhone { get; set; }
+    public DateOnly CheckInDate { get; set; }
+    public DateOnly CheckOutDate { get; set; }
+    [MaxLength(20)] public string Status { get; set; } = "ACTIVE";
+    public DateTime HeldAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime ExpiresAtUtc { get; set; }
+    public DateTime? ReleasedAtUtc { get; set; }
+    [MaxLength(200)] public string? ReleaseReason { get; set; }
+    public int? ConvertedReservationId { get; set; }
+    public int CreatedByUserId { get; set; }
+    [MaxLength(80)] public string? IdempotencyKey { get; set; }
+}
+public sealed class HousekeepingTaskItem
+{
+    public int Id { get; set; }
+    public int TaskId { get; set; }
+    [MaxLength(40)] public string ChecklistCode { get; set; } = "";
+    [MaxLength(120)] public string Label { get; set; } = "";
+    public bool IsRequired { get; set; } = true;
+    public bool IsDone { get; set; }
+    [MaxLength(200)] public string? Note { get; set; }
+}
+public sealed class HousekeepingTaskMedia
+{
+    public int Id { get; set; }
+    public int TaskId { get; set; }
+    [MaxLength(240)] public string ObjectKey { get; set; } = "";
+    [MaxLength(80)] public string ContentType { get; set; } = "";
+    public long FileSize { get; set; }
+    [MaxLength(20)] public string MediaType { get; set; } = "PHOTO";
+    public int UploadedByUserId { get; set; }
+    public DateTime UploadedAtUtc { get; set; } = DateTime.UtcNow;
+}
+public sealed class NightAuditLine
+{
+    public int Id { get; set; }
+    public int NightAuditLogId { get; set; }
+    public int ReservationId { get; set; }
+    public DateOnly BusinessDate { get; set; }
+    [MaxLength(20)] public string Action { get; set; } = "";
+    [Precision(18, 2)] public decimal Amount { get; set; }
+    public int? FolioChargeId { get; set; }
+}
+public sealed class NotificationDispatch
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int ReservationId { get; set; }
+    [MaxLength(40)] public string NotificationType { get; set; } = "";
+    [MaxLength(40)] public string Milestone { get; set; } = "";
+    [MaxLength(20)] public string Channel { get; set; } = "IN_APP";
+    [MaxLength(20)] public string Status { get; set; } = "LOGGED";
+    public DateTime ScheduledAtUtc { get; set; }
+    public DateTime? SentAtUtc { get; set; }
+    public int AttemptCount { get; set; } = 1;
+    [MaxLength(200)] public string? LastError { get; set; }
+    [MaxLength(120)] public string IdempotencyKey { get; set; } = "";
+}
+public sealed class PaymentRefund
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int ReservationId { get; set; }
+    public int OriginalPaymentId { get; set; }
+    [Precision(18, 2)] public decimal RequestedAmount { get; set; }
+    [Precision(18, 2)] public decimal? ApprovedAmount { get; set; }
+    [MaxLength(40)] public string ReasonCode { get; set; } = "";
+    [MaxLength(200)] public string? ReasonText { get; set; }
+    [MaxLength(20)] public string Status { get; set; } = "PENDING";
+    public int RequestedByUserId { get; set; }
+    public int? ApprovedByUserId { get; set; }
+    public DateTime RequestedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? ApprovedAtUtc { get; set; }
+    public int? PostedPaymentId { get; set; }
+    [MaxLength(80)] public string IdempotencyKey { get; set; } = "";
+}
 public sealed class AppUser
 {
     public int Id { get; set; }
@@ -223,6 +365,8 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<Reservation> Reservations => Set<Reservation>();
     public DbSet<Stay> Stays => Set<Stay>();
+    public DbSet<RoomTransferHistory> RoomTransfers => Set<RoomTransferHistory>();
+    public DbSet<GroupMembershipEvent> GroupMemberships => Set<GroupMembershipEvent>();
     public DbSet<ReservationOccupant> Occupants => Set<ReservationOccupant>();
     public DbSet<ServiceItem> Services => Set<ServiceItem>();
     public DbSet<FolioCharge> Charges => Set<FolioCharge>();
@@ -242,7 +386,15 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<ChannelSyncLog> ChannelSyncLogs => Set<ChannelSyncLog>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<HousekeepingTask> HousekeepingTasks => Set<HousekeepingTask>();
+    public DbSet<HousekeepingTaskItem> HousekeepingTaskItems => Set<HousekeepingTaskItem>();
+    public DbSet<HousekeepingTaskMedia> HousekeepingTaskMedia => Set<HousekeepingTaskMedia>();
     public DbSet<DeskNote> DeskNotes => Set<DeskNote>();
+    public DbSet<BookingNoteType> BookingNoteTypes => Set<BookingNoteType>();
+    public DbSet<ReservationNote> ReservationNotes => Set<ReservationNote>();
+    public DbSet<ReservationHold> ReservationHolds => Set<ReservationHold>();
+    public DbSet<NightAuditLine> NightAuditLines => Set<NightAuditLine>();
+    public DbSet<NotificationDispatch> NotificationDispatches => Set<NotificationDispatch>();
+    public DbSet<PaymentRefund> PaymentRefunds => Set<PaymentRefund>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -255,6 +407,18 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<Reservation>().ToTable("reservations").HasIndex(x => x.Code).IsUnique();
         b.Entity<Reservation>().HasIndex(x => new { x.PropertyId, x.RoomId, x.CheckInDate, x.CheckOutDate });
         b.Entity<Stay>().ToTable("stays").HasIndex(x => x.ReservationId).IsUnique();
+        b.Entity<RoomTransferHistory>().ToTable("room_transfer_histories").HasIndex(x => new { x.StayId, x.EffectiveAtUtc });
+        b.Entity<RoomTransferHistory>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<Stay>().WithMany().HasForeignKey(x => x.StayId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<Room>().WithMany().HasForeignKey(x => x.OldRoomId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<Room>().WithMany().HasForeignKey(x => x.NewRoomId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<RoomTransferHistory>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<GroupMembershipEvent>().ToTable("group_membership_events").HasIndex(x => new { x.PropertyId, x.NewGroupCode, x.CreatedAtUtc });
+        b.Entity<GroupMembershipEvent>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<GroupMembershipEvent>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<GroupMembershipEvent>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<ReservationOccupant>().ToTable("reservation_occupants").HasIndex(x => x.ReservationId);
         b.Entity<ServiceItem>().ToTable("services").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<FolioCharge>().ToTable("folio_charges");
@@ -264,6 +428,37 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<AuditEvent>().ToTable("audit_events");
         b.Entity<HousekeepingTask>().ToTable("housekeeping_tasks").HasIndex(x => new { x.PropertyId, x.Status });
         b.Entity<DeskNote>().ToTable("desk_notes").HasIndex(x => new { x.PropertyId, x.Status });
+        b.Entity<BookingNoteType>().ToTable("booking_note_types");
+        b.Entity<ReservationNote>().ToTable("reservation_notes").HasIndex(x => x.ReservationId);
+        b.Entity<ReservationHold>().ToTable("reservation_holds").HasIndex(x => new { x.RoomId, x.Status, x.ExpiresAtUtc });
+        b.Entity<HousekeepingTaskItem>().ToTable("housekeeping_task_items").HasIndex(x => new { x.TaskId, x.ChecklistCode }).IsUnique();
+        b.Entity<HousekeepingTaskMedia>().ToTable("housekeeping_task_media");
+        b.Entity<NightAuditLine>().ToTable("night_audit_lines").HasIndex(x => new { x.ReservationId, x.BusinessDate }).IsUnique();
+        b.Entity<NotificationDispatch>().ToTable("notification_dispatches").HasIndex(x => x.IdempotencyKey).IsUnique();
+        b.Entity<PaymentRefund>().ToTable("payment_refunds").HasIndex(x => x.IdempotencyKey).IsUnique();
+        b.Entity<BookingNoteType>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationNote>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationNote>().HasOne<BookingNoteType>().WithMany().HasForeignKey(x => x.NoteTypeId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationNote>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationHold>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationHold>().HasOne<Room>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationHold>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ConvertedReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ReservationHold>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<HousekeepingTaskItem>().HasOne<HousekeepingTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<HousekeepingTaskMedia>().HasOne<HousekeepingTask>().WithMany().HasForeignKey(x => x.TaskId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<HousekeepingTaskMedia>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NightAuditLine>().HasOne<NightAuditLog>().WithMany().HasForeignKey(x => x.NightAuditLogId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NightAuditLine>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NightAuditLine>().HasOne<FolioCharge>().WithMany().HasForeignKey(x => x.FolioChargeId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NotificationDispatch>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NotificationDispatch>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<Payment>().WithMany().HasForeignKey(x => x.OriginalPaymentId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<Payment>().WithMany().HasForeignKey(x => x.PostedPaymentId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<PaymentRefund>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<FolioCharge>().HasOne<NightAuditLog>().WithMany().HasForeignKey(x => x.NightAuditLogId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<AppUser>().ToTable("app_users").HasIndex(x => x.Email).IsUnique();
         b.Entity<HotelBuilding>().ToTable("hotel_buildings").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<RatePlan>().ToTable("rate_plans").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();

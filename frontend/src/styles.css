@@ -736,6 +736,22 @@ tr:hover td { background: #fafbfd; }
 .quote-head { margin-bottom: 6px; color: #24324a; }
 .quote-line { padding: 4px 0; color: #52627a; font-size: .86rem; }
 .quote-box small { display: block; margin-top: 8px; color: #7b8798; }
+.co-sheet { background: #fff; color: #1c1c1c; border: 1px solid #d9d9d9; padding: 22px 24px 16px; font-family: "Times New Roman", Times, serif; width: 100%; max-width: 100%; overflow-x: auto; box-sizing: border-box; contain: inline-size; }
+.co-head { display: flex; gap: 18px; align-items: flex-start; border-bottom: 2px solid #c4161c; padding-bottom: 10px; }
+.co-logo { width: 92px; text-align: center; color: #c4161c; flex: none; }
+.co-logo svg { display: block; margin: 0 auto 2px; }
+.co-logo b { display: block; font-family: Arial, sans-serif; font-size: 11px; letter-spacing: .04em; }
+.co-id { font-family: Arial, sans-serif; font-size: 12px; line-height: 1.45; }
+.co-id b { display: block; font-size: 15px; margin-bottom: 2px; }
+.co-id span { display: block; }
+.co-sheet h2 { margin: 14px 0 6px; text-align: center; font-size: 18px; letter-spacing: .02em; line-height: 1.35; }
+.co-meta { margin: 0; text-align: center; font-size: 13px; }
+.co-grid { width: 100%; min-width: 760px; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.co-grid th, .co-grid td { border: 1px solid #222; padding: 4px 6px; vertical-align: top; }
+.co-grid th { text-align: center; font-weight: 700; background: #fff; }
+.co-grid td.num { text-align: right; white-space: nowrap; }
+.co-grid td.stt { text-align: center; width: 42px; }
+.co-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 8px 0; }
 .checkbox-line { display: flex; align-items: center; gap: 8px; margin: 12px 0; font-size: .84rem; }
 .modal-actions {
   border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px;

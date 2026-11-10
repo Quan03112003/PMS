@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace HotelPms.Api;
 
@@ -98,6 +99,35 @@ public static class RoomCardPricing
             return lines;
         }
         catch (JsonException) { return []; }
+    }
+
+    public static string RetargetCard(string? json, RoomType type, string mode, DateOnly checkIn, DateOnly checkOut, int adults, int children)
+    {
+        var weekday = type.WeekdayRate ?? type.BaseRate;
+        var weekend = type.WeekendRate ?? weekday;
+        var hourly = type.HourlyRate ?? type.BaseRate;
+        var extraHour = type.ExtraHourRate ?? 0m;
+        var extraPerson = type.ExtraPersonRate ?? 0m;
+        var capacity = Math.Max(1, type.Capacity);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                var node = JsonNode.Parse(json)!.AsObject();
+                node["weekdayUnit"] = weekday;
+                node["weekendUnit"] = weekend;
+                node["hourlyUnit"] = hourly;
+                node["extraHourUnit"] = extraHour;
+                node["extraPersonUnit"] = extraPerson;
+                node["capacity"] = capacity;
+                node["source"] = "ROOM_MOVE";
+                return node.ToJsonString();
+            }
+            catch (JsonException) { }
+        }
+        var start = checkOut > checkIn ? checkIn : checkOut.AddDays(-1);
+        var (lines, _) = Build(type, null, mode, start, checkOut > start ? checkOut : start.AddDays(1), Math.Max(1, adults), Math.Max(0, children), null, null);
+        return Serialize("ROOM_CARD", mode, lines, type, null, null);
     }
 
     public static decimal LockedTotal(string? json) => Read(json).Sum(x => x.Amount);
