@@ -12,6 +12,9 @@ public sealed class Property
     [MaxLength(150)] public string City { get; set; } = "";
     [MaxLength(300)] public string Address { get; set; } = "";
     [MaxLength(15)] public string Phone { get; set; } = "";
+    [MaxLength(30)] public string? Fax { get; set; }
+    [MaxLength(120)] public string? Email { get; set; }
+    [MaxLength(200)] public string? Website { get; set; }
     public TimeOnly CheckInTime { get; set; } = new(14, 0);
     public TimeOnly CheckOutTime { get; set; } = new(12, 0);
     [MaxLength(64)] public string TimeZoneId { get; set; } = "Asia/Ho_Chi_Minh"; // IANA id
@@ -372,6 +375,9 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<FolioCharge> Charges => Set<FolioCharge>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<CashShift> Shifts => Set<CashShift>();
+    public DbSet<ShiftHandover> ShiftHandovers => Set<ShiftHandover>();
+    public DbSet<ShiftHandoverItem> ShiftHandoverItems => Set<ShiftHandoverItem>();
+    public DbSet<ShiftHandoverNote> ShiftHandoverNotes => Set<ShiftHandoverNote>();
     public DbSet<Agency> Agencies => Set<Agency>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AdjustmentVoucher> AdjustmentVouchers => Set<AdjustmentVoucher>();
@@ -424,6 +430,17 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<FolioCharge>().ToTable("folio_charges");
         b.Entity<Payment>().ToTable("payments").HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter(NotNullFilter("idempotency_key"));
         b.Entity<CashShift>().ToTable("cash_shifts");
+        b.Entity<ShiftHandover>().ToTable("shift_handovers").HasIndex(x => x.CashShiftId).IsUnique();
+        b.Entity<ShiftHandoverItem>().ToTable("shift_handover_items").HasIndex(x => x.HandoverId);
+        b.Entity<ShiftHandoverNote>().ToTable("shift_handover_notes").HasIndex(x => x.HandoverId);
+        b.Entity<ShiftHandover>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandover>().HasOne<CashShift>().WithMany().HasForeignKey(x => x.CashShiftId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandover>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.FromUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandover>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.ToUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandover>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.AcknowledgedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandoverItem>().HasOne<ShiftHandover>().WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandoverNote>().HasOne<ShiftHandover>().WithMany().HasForeignKey(x => x.HandoverId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ShiftHandoverNote>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.AuthorUserId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<Agency>().ToTable("agencies").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<AuditEvent>().ToTable("audit_events");
         b.Entity<HousekeepingTask>().ToTable("housekeeping_tasks").HasIndex(x => new { x.PropertyId, x.Status });

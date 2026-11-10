@@ -30,6 +30,11 @@ export class AppComponent implements OnInit, OnDestroy {
   ratePlans: any[] = [];
   users: any[] = [];
   shifts: any[] = [];
+  handovers: any[] = [];
+  handoverReceivers: any[] = [];
+  handoverPreview: any = null;
+  selectedHandoverShift: any = null;
+  handoverForm = { toUserId: 0, declaredCash: 0, note: '' };
   audits: any[] = [];
   dashboard: any = {};
   report: any = null;
@@ -54,6 +59,9 @@ export class AppComponent implements OnInit, OnDestroy {
   priceTouched = false;
   deskNotes: any[] = [];
   closeout: any = { warnings: [], holds: [], notes: [], audits: [], refunds: [], alerts: [], noteTypes: [], integrations: null };
+  bookingNoteTypes: any[] = [];
+  bookingNoteText: Record<number, string> = {};
+  contactForm = { fax: '', email: '', website: '' };
   depositForm = { reservationId: 0, amount: 0, dueAt: '', policy: 'STANDARD' };
   noteForm = { reservationId: 0, noteTypeId: 0, text: '' };
   holdForm = { roomId: 0, guestName: '', phone: '', checkInDate: '', checkOutDate: '', holdMinutes: 30 };
@@ -227,10 +235,18 @@ export class AppComponent implements OnInit, OnDestroy {
       this.properties = props;
       const stored = Number(localStorage.getItem('pms_property'));
       this.propertyId = props.some(p => p.id === stored) ? stored : props[0]?.id || 0;
+      this.fillContact();
       this.refresh();
     }, error: e => this.onError(e) });
   }
-  changeProperty(): void { this.propertyId = Number(this.propertyId); localStorage.setItem('pms_property', String(this.propertyId)); this.floor = 0; this.refresh(); }
+  changeProperty(): void { this.propertyId = Number(this.propertyId); localStorage.setItem('pms_property', String(this.propertyId)); this.floor = 0; this.fillContact(); this.refresh(); }
+  fillContact(): void {
+    const hotel = this.currentProperty;
+    this.contactForm = { fax: hotel?.fax || '', email: hotel?.email || '', website: hotel?.website || '' };
+  }
+  savePropertyContact(): void {
+    this.run(this.api.patch(`/properties/${this.propertyId}/contact`, this.contactForm), () => this.loadProperties(), 'Đã lưu fax, email và website');
+  }
   setView(v: string): void { this.view = v; this.sidebarOpen = false; this.filter = ''; this.expandTo(v); this.refresh(); }
   nodeVisible(node: MenuNode): boolean {
     if (node.children) return node.children.some(c => this.nodeVisible(c));
@@ -271,7 +287,10 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.view === 'users') this.api.get<any[]>(`/users?propertyId=${id}`).subscribe({ next: r => this.users = r, error: e => this.onError(e) });
     if (this.view === 'guests') this.api.get<any[]>(`/guests?propertyId=${id}`).subscribe({ next: r => this.guests = r, error: e => this.onError(e) });
     if (this.view === 'agencies') this.api.get<any[]>(`/agencies?propertyId=${id}`).subscribe({ next: r => this.agencies = r, error: e => this.onError(e) });
-    if (this.view === 'shifts') this.api.get<any[]>(`/shifts?propertyId=${id}`).subscribe({ next: r => this.shifts = r, error: e => this.onError(e) });
+    if (this.view === 'shifts') {
+      this.api.get<any[]>(`/shifts?propertyId=${id}`).subscribe({ next: r => this.shifts = r, error: e => this.onError(e) });
+      this.api.get<any[]>(`/shift-handovers?propertyId=${id}`).subscribe({ next: r => this.handovers = r, error: e => this.onError(e) });
+    }
     if (this.view === 'audit') this.api.get<any[]>(`/audit?propertyId=${id}`).subscribe({ next: r => this.audits = r, error: e => this.onError(e) });
     if (this.view === 'reports') this.loadReport();
   }
@@ -280,7 +299,8 @@ export class AppComponent implements OnInit, OnDestroy {
     const dict: Record<string, string> = { VACANT: 'Phòng trống', OCCUPIED: 'Đang ở', ARRIVAL: 'Khách sắp đến', DIRTY: 'Chưa dọn',
       MAINTENANCE: 'Bảo trì', CLEAN: 'Đã dọn', INSPECTED: 'Sẵn sàng', CONFIRMED: 'Đã xác nhận', CHECKED_IN: 'Đang ở',
       CHECKED_OUT: 'Đã trả', CANCELLED: 'Đã hủy', OPEN: 'Đang mở', CLOSED: 'Đã khóa', DIRECT: 'Trực tiếp', OTA: 'OTA',
-      NEW: 'Đang dọn', PENDING: 'Chờ nghiệm thu', FINISH: 'Đã dọn xong', STAY: 'Dọn lưu', CHECKOUT: 'Dọn checkout' };
+      NEW: 'Đang dọn', PENDING: 'Chờ nghiệm thu', FINISH: 'Đã dọn xong', STAY: 'Dọn lưu', CHECKOUT: 'Dọn checkout',
+      SUBMITTED: 'Chờ nhận ca', ACKNOWLEDGED: 'Đã nhận ca' };
     return dict[status] || status;
   }
   badge(status: string): string { return status.toLowerCase().replaceAll('_', '-'); }
@@ -294,9 +314,12 @@ export class AppComponent implements OnInit, OnDestroy {
       commissionPercent: 0, ...values };
     if (type === 'booking') {
       this.priceTouched = false; this.priceQuote = null;
+      this.bookingNoteText = {};
+      this.bookingNoteTypes = [];
       this.searchAvailable();
       this.api.get<any[]>(`/rate-plans?propertyId=${this.propertyId}`).subscribe({next: x => this.ratePlans = x, error: e => this.onError(e)});
       this.api.get<any[]>(`/agencies?propertyId=${this.propertyId}`).subscribe({next: x => this.agencies = x, error: e => this.onError(e)});
+      this.api.get<any[]>(`/booking-note-types?propertyId=${this.propertyId}`).subscribe({next: x => this.bookingNoteTypes = x.filter(t => t.isActive !== false), error: e => this.onError(e)});
     }
   }
   searchAvailable(): void {
@@ -328,12 +351,17 @@ export class AppComponent implements OnInit, OnDestroy {
     this.api.post<any>('/pricing/room-quote', payload).subscribe({ next: q => { this.priceQuote = q; if (!this.priceTouched) this.form.nightlyRate = q.roomUnit; }, error: e => this.onError(e) });
   }
   chooseRoom(r: any): void { this.form.roomId = r.id; this.refreshQuote(); }
+  get requiredBookingNotes(): any[] { return this.bookingNoteTypes.filter(t => t.isRequired && t.isActive !== false); }
+  requiredNotesReady(): boolean { return this.requiredBookingNotes.every(t => `${this.bookingNoteText[t.id] || ''}`.trim()); }
   createBooking(): void {
     if (!this.form.roomId || !this.form.guestName) { this.notice('Vui lòng chọn phòng và nhập tên khách', true); return; }
+    if (!this.requiredNotesReady()) { this.notice('Nhập đủ ghi chú bắt buộc trước khi xác nhận', true); return; }
+    const notes = this.requiredBookingNotes.map(t => ({ noteTypeId: t.id, noteText: `${this.bookingNoteText[t.id]}`.trim() }));
     const payload = { ...this.form, roomId: Number(this.form.roomId), adults: Number(this.form.adults || 1), children: Number(this.form.children || 0),
       nightlyRate: this.priceTouched ? Number(this.form.nightlyRate) : null,
       ratePlanId: this.form.selectedRatePlanId ? Number(this.form.selectedRatePlanId) : null,
-      plannedHours: this.form.bookingMode === 'HOURLY' && this.form.plannedHours ? Number(this.form.plannedHours) : null };
+      plannedHours: this.form.bookingMode === 'HOURLY' && this.form.plannedHours ? Number(this.form.plannedHours) : null,
+      notes };
     this.run(this.api.post('/reservations', payload), () => this.setView('bookings'), 'Đã tạo và xác nhận đặt phòng');
   }
   createRoomType(): void {
@@ -419,8 +447,32 @@ export class AppComponent implements OnInit, OnDestroy {
     this.run(this.api.patch(`/rooms/${room.id}/maintenance`, { isOutOfOrder: !room.isOutOfOrder, note: !room.isOutOfOrder ? 'Khóa bảo trì từ giao diện PMS' : '' }));
   }
   openShiftAction(): void { this.run(this.api.post('/shifts/open', { propertyId: this.propertyId, openingAmount: Number(this.form.openingAmount) })); }
+  handoverOf(shiftId: number): any { return this.handovers.find(h => h.cashShiftId === shiftId); }
+  handoverKind(kind: string): string {
+    const labels: Record<string, string> = { ARRIVAL: 'Đến chưa nhận', DEPARTURE: 'Đến hạn trả', NOTE: 'Yêu cầu đặc biệt', MAINTENANCE: 'Phòng bảo trì', HOUSEKEEPING: 'Việc buồng phòng', DEBT: 'Công nợ', DESK: 'Ghi chú lễ tân', MEMBER: 'Thẻ thành viên' };
+    return labels[kind] || kind;
+  }
+  prepareHandover(shift: any): void {
+    this.selectedHandoverShift = shift;
+    this.handoverForm = { toUserId: 0, declaredCash: Number(shift.openingAmount) || 0, note: '' };
+    this.handoverPreview = null;
+    this.api.get<any>(`/shifts/${shift.id}/handover-preview`).subscribe({ next: r => { this.handoverPreview = r; this.handoverForm.declaredCash = Number(r.expectedCash) || 0; }, error: e => this.onError(e) });
+    this.api.get<any[]>(`/shift-handover-receivers?propertyId=${shift.propertyId}`).subscribe({ next: r => this.handoverReceivers = r, error: e => this.onError(e) });
+  }
+  submitHandover(): void {
+    const shift = this.selectedHandoverShift;
+    if (!shift || !this.handoverForm.toUserId) return;
+    this.run(this.api.post(`/shifts/${shift.id}/handover`, { toUserId: Number(this.handoverForm.toUserId), declaredCash: Number(this.handoverForm.declaredCash), note: this.handoverForm.note }), () => { this.selectedHandoverShift = null; this.handoverPreview = null; }, 'Đã gửi sổ giao ca');
+  }
+  acknowledgeHandover(book: any): void { this.run(this.api.post(`/shift-handovers/${book.id}/acknowledge`, {}), undefined, 'Đã xác nhận nhận ca'); }
+  addHandoverNote(book: any, text: string): void {
+    const note = (text || '').trim();
+    if (!note) return;
+    this.run(this.api.post(`/shift-handovers/${book.id}/notes`, { text: note }), undefined, 'Đã bổ sung vào sổ');
+  }
   closeShiftAction(shift: any): void {
-    this.form = { shiftId: shift.id, closingAmount: shift.openingAmount, note: '' }; this.modal = 'closeShift';
+    const handed = this.handoverOf(shift.id);
+    this.form = { shiftId: shift.id, closingAmount: handed?.declaredCash ?? shift.openingAmount, note: '' }; this.modal = 'closeShift';
   }
   confirmCloseShift(): void { this.run(this.api.post(`/shifts/${this.form.shiftId}/close`, { closingAmount: Number(this.form.closingAmount), note: this.form.note })); }
   loadReport(): void {
@@ -478,6 +530,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.run(this.api.patch(`/reservations/${this.depositForm.reservationId}/deposit-terms`, { amount: +this.depositForm.amount, dueAtUtc: this.depositForm.dueAt ? new Date(this.depositForm.dueAt).toISOString() : null, policyCode: this.depositForm.policy }), () => this.loadCloseout(), 'Đã lưu hạn cọc. Phiếu không bị hủy.');
   }
   scanDeposits(): void { this.run(this.api.post(`/deposits/reminders?propertyId=${this.propertyId}`, {}), () => this.loadCloseout(), 'Đã ghi nhắc cọc. Không hủy phiếu.'); }
+  toggleNoteRequired(t: any): void {
+    this.run(this.api.patch(`/booking-note-types/${t.id}`, { isRequired: !t.isRequired }), () => this.loadCloseout(), t.isRequired ? 'Đã bỏ bắt buộc' : 'Đã đặt bắt buộc khi xác nhận');
+  }
   saveNote(): void {
     this.run(this.api.post(`/reservations/${this.noteForm.reservationId}/notes`, { noteTypeId: +this.noteForm.noteTypeId, noteText: this.noteForm.text }), () => { this.noteForm.text = ''; this.loadNotes(); }, 'Đã lưu ghi chú, bản cũ được giữ');
   }
@@ -505,6 +560,12 @@ export class AppComponent implements OnInit, OnDestroy {
     this.run(this.api.patch(`/housekeeping-task-items/${item.id}`, { isDone: !item.isDone, note: item.note || '' }), undefined, item.isDone ? 'Đã bỏ hạng mục' : 'Đã xong hạng mục');
   }
   approveTask(task: any): void { this.run(this.api.post(`/housekeeping-tasks/${task.id}/approve`, {}), undefined, 'Đã nghiệm thu phòng'); }
+  uploadTaskPhoto(task: any, event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    this.run(this.api.postFile(`/housekeeping-tasks/${task.id}/media`, file), () => { input.value = ''; }, 'Đã lưu ảnh nghiệm thu');
+  }
   saveTask(task: any): void {
     this.run(this.api.patch(`/housekeeping-tasks/${task.id}`, { cleaner1: task.cleaner1, cleaner2: task.cleaner2, cleaner3: task.cleaner3, note: task.note }), undefined, 'Đã lưu phiếu dọn');
   }

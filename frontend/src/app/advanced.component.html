@@ -7,7 +7,7 @@
   @if (success) { <div class="adv-message ok">{{ success }}</div> }
   <ng-template #coHead let-title="title" let-extra="extra">
     <header class="co-head"><div class="co-logo"><svg viewBox="0 0 64 56" width="58" height="50" aria-hidden="true"><polygon points="32,3 61,53 3,53" fill="#c4161c"/></svg><b>{{ hotel.code }}</b></div>
-      <div class="co-id"><b>{{ hotel.name }}</b><span>Address: {{ hotel.address || hotel.city || '—' }}</span><span>Tel: {{ hotel.phone || '—' }} - Fax:</span><span>E-mail: — - Website: —</span></div></header>
+      <div class="co-id"><b>{{ hotel.name }}</b><span>Address: {{ hotel.address || hotel.city || '—' }}</span><span>Tel: {{ hotel.phone || '—' }} - Fax: {{ hotel.fax || '—' }}</span><span>E-mail: {{ hotel.email || '—' }} - Website: {{ hotel.website || '—' }}</span></div></header>
     <h2>{{ title }}</h2>
     @if (extra) { <p class="co-meta">{{ extra }}</p> } @else { <p class="co-meta">Từ ngày: {{ vnDate(from) }} 00:00 đến ngày: {{ vnDate(to) }} 23:59</p> }
   </ng-template>
@@ -88,7 +88,7 @@
     @if (stockCard) {
       <article class="co-sheet" id="stock-sheet">
         <header class="co-head"><div class="co-logo"><svg viewBox="0 0 64 56" width="58" height="50" aria-hidden="true"><polygon points="32,3 61,53 3,53" fill="#c4161c"/></svg><b>{{ stockCard.property.code }}</b></div>
-          <div class="co-id"><b>{{ stockCard.property.name }}</b><span>Address: {{ stockCard.property.address || stockCard.property.city }}</span><span>Tel: {{ stockCard.property.phone || '—' }} - Fax:</span><span>E-mail: — - Website: —</span></div></header>
+          <div class="co-id"><b>{{ stockCard.property.name }}</b><span>Address: {{ stockCard.property.address || stockCard.property.city }}</span><span>Tel: {{ stockCard.property.phone || '—' }} - Fax: {{ stockCard.property.fax || '—' }}</span><span>E-mail: {{ stockCard.property.email || '—' }} - Website: {{ stockCard.property.website || '—' }}</span></div></header>
         <h2>BÁO CÁO NHẬP XUẤT TỒN KHO HÀNG HÓA, DỊCH VỤ</h2>
         <p class="co-meta">Từ ngày: {{ vnDate(stockCard.from) }} 00:00 đến ngày: {{ vnDate(stockCard.to) }} 23:59</p>
         <p class="co-meta">Tên dịch vụ: {{ stockCard.serviceName }} &nbsp;&nbsp; Nhóm hàng: {{ stockCard.groupName }}</p>
@@ -185,7 +185,7 @@
     @if (receiptCard) {
       <article class="co-sheet" id="receipt-sheet">
         <header class="co-head"><div class="co-logo"><svg viewBox="0 0 64 56" width="58" height="50" aria-hidden="true"><polygon points="32,3 61,53 3,53" fill="#c4161c"/></svg><b>{{ receiptCard.property.code }}</b></div>
-          <div class="co-id"><b>{{ receiptCard.property.name }}</b><span>Address: {{ receiptCard.property.address || receiptCard.property.city }}</span><span>Tel: {{ receiptCard.property.phone || '—' }} - Fax:</span><span>E-mail: — - Website: —</span></div></header>
+          <div class="co-id"><b>{{ receiptCard.property.name }}</b><span>Address: {{ receiptCard.property.address || receiptCard.property.city }}</span><span>Tel: {{ receiptCard.property.phone || '—' }} - Fax: {{ receiptCard.property.fax || '—' }}</span><span>E-mail: {{ receiptCard.property.email || '—' }} - Website: {{ receiptCard.property.website || '—' }}</span></div></header>
         <h2>{{ receiptCard.title }}</h2>
         <p class="co-meta">Từ ngày: {{ vnDate(receiptCard.from) }} 00:00 đến ngày: {{ vnDate(receiptCard.to) }} 23:59</p>
         <p class="co-meta">Tìm kiếm: {{ receiptCard.guestName }}</p>
@@ -208,7 +208,7 @@
     @if (cashCard) {
       <article class="co-sheet" id="cash-sheet">
         <header class="co-head"><div class="co-logo"><svg viewBox="0 0 64 56" width="58" height="50" aria-hidden="true"><polygon points="32,3 61,53 3,53" fill="#c4161c"/></svg><b>{{ cashCard.property.code }}</b></div>
-          <div class="co-id"><b>{{ cashCard.property.name }}</b><span>Address: {{ cashCard.property.address || cashCard.property.city }}</span><span>Tel: {{ cashCard.property.phone || '—' }} - Fax:</span><span>E-mail: — - Website: —</span></div></header>
+          <div class="co-id"><b>{{ cashCard.property.name }}</b><span>Address: {{ cashCard.property.address || cashCard.property.city }}</span><span>Tel: {{ cashCard.property.phone || '—' }} - Fax: {{ cashCard.property.fax || '—' }}</span><span>E-mail: {{ cashCard.property.email || '—' }} - Website: {{ cashCard.property.website || '—' }}</span></div></header>
         <h2>{{ cashCard.title }}</h2>
         <p class="co-meta">Từ ngày: {{ vnDate(cashCard.from) }} 00:00 đến ngày: {{ vnDate(cashCard.to) }} 23:59</p>
         <p class="co-meta">Hình thức: {{ cashCard.methodLabel }}</p>

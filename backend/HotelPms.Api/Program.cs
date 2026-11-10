@@ -61,7 +61,7 @@ app.MapGet("/api/health/ready", async (PmsDbContext db, ILogger<PmsDbContext> lo
     timeout.CancelAfter(TimeSpan.FromSeconds(5));
     try {
         await db.Database.ExecuteSqlRawAsync(
-            "SELECT p.time_zone_id, r.rate_plan_snapshot, r.deposit_required_amount, a.id, t.id, h.id, e.id, cc.id, cm.id, cb.fingerprint, cl.id, g.title, rt.weekday_rate, ht.id, dn.id, mv.id, ge.id, bn.id, hd.id, nl.id, rf.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e, channel_connections cc, channel_room_mappings cm, channel_bookings cb, channel_sync_logs cl, guests g, room_types rt, housekeeping_tasks ht, desk_notes dn, room_transfer_histories mv, group_membership_events ge, booking_note_types bn, reservation_holds hd, night_audit_lines nl, payment_refunds rf WHERE 1 = 0",
+            "SELECT p.time_zone_id, p.fax, p.email, p.website, r.rate_plan_snapshot, r.deposit_required_amount, a.id, t.id, h.id, e.id, cc.id, cm.id, cb.fingerprint, cl.id, g.title, rt.weekday_rate, ht.id, dn.id, mv.id, ge.id, bn.id, hd.id, nl.id, rf.id, sh.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e, channel_connections cc, channel_room_mappings cm, channel_bookings cb, channel_sync_logs cl, guests g, room_types rt, housekeeping_tasks ht, desk_notes dn, room_transfer_histories mv, group_membership_events ge, booking_note_types bn, reservation_holds hd, night_audit_lines nl, payment_refunds rf, shift_handovers sh WHERE 1 = 0",
             timeout.Token);
         return Results.Ok(new { status = "ready", database = "ok" });
     } catch (Exception ex) {
@@ -97,11 +97,24 @@ api.MapPost("/properties", async (PropertyInput req, ClaimsPrincipal user, PmsDb
     if (!user.IsInRole("CHAIN_ADMIN")) return Results.Forbid();
     if (string.IsNullOrWhiteSpace(req.Code) || string.IsNullOrWhiteSpace(req.Name)) return Ops.Fail("Cần nhập mã và tên khách sạn");
     if (await db.Properties.AnyAsync(p => p.Code == req.Code)) return Ops.Conflict("Mã khách sạn đã tồn tại");
+    var contact = Ops.ReadContact(req.Fax, req.Email, req.Website);
+    if (contact.Error != null) return Ops.Fail(contact.Error);
     var property = new Property { Code = req.Code.Trim().ToUpperInvariant(), Name = req.Name.Trim(), City = req.City?.Trim() ?? "",
-        Address = req.Address?.Trim() ?? "", Phone = req.Phone?.Trim() ?? "" };
+        Address = req.Address?.Trim() ?? "", Phone = req.Phone?.Trim() ?? "", Fax = contact.Fax, Email = contact.Email, Website = contact.Website };
     db.Properties.Add(property); await db.SaveChangesAsync();
     await Ops.Log(db, user, property.Id, "PROPERTY_CREATE", "Property", property.Id);
     return Results.Ok(property);
+});
+api.MapPatch("/properties/{id:int}/contact", async (int id, PropertyContactInput req, ClaimsPrincipal actor, PmsDbContext db) => {
+    if (!Ops.CanManage(actor) || !Ops.HasScope(actor, id)) return Results.Forbid();
+    var property = await db.Properties.FindAsync(id);
+    if (property == null) return Results.NotFound();
+    var contact = Ops.ReadContact(req.Fax, req.Email, req.Website);
+    if (contact.Error != null) return Ops.Fail(contact.Error);
+    property.Fax = contact.Fax; property.Email = contact.Email; property.Website = contact.Website;
+    await db.SaveChangesAsync();
+    await Ops.Log(db, actor, property.Id, "PROPERTY_CONTACT", "Property", property.Id);
+    return Results.Ok(new { property.Id, property.Fax, property.Email, property.Website });
 });
 api.MapGet("/users", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.CanManage(user) || !Ops.HasScope(user, propertyId)) return Results.Forbid();
@@ -220,6 +233,8 @@ api.MapPatch("/rooms/{roomId:int}/housekeeping", async (int roomId, Housekeeping
         return Ops.Fail("Còn hạng mục bắt buộc chưa xong, chưa nghiệm thu");
     if (req.Status == "INSPECTED" && openTask != null && await db.HousekeepingTaskItems.AnyAsync(i => i.TaskId == openTask.Id) && !Ops.CanManage(user))
         return Ops.Fail("Chỉ quản lý nghiệm thu phòng");
+    if (req.Status == "INSPECTED" && (openTask == null || !await db.HousekeepingTaskMedia.AnyAsync(m => m.TaskId == openTask.Id)))
+        return Ops.Fail("Cần ảnh nghiệm thu trước khi trả phòng về sẵn sàng");
     if (req.Status == "DIRTY" && openTask == null) {
         var inHouse = await db.Reservations.AnyAsync(r => r.RoomId == room.Id && r.Status == "CHECKED_IN");
         await V5Closeout.EnsureCleaningTask(db, room, inHouse ? "STAY" : "CHECKOUT");
@@ -249,7 +264,8 @@ api.MapGet("/housekeeping-tasks", async (int propertyId, ClaimsPrincipal user, P
         select new { t.Id, t.RoomId, RoomNumber = room.Number, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note }).Take(80).ToListAsync();
     var ids = rows.Select(x => x.Id).ToArray();
     var items = await db.HousekeepingTaskItems.Where(i => ids.Contains(i.TaskId)).ToListAsync();
-    return Results.Ok(rows.Select(t => new { t.Id, t.RoomId, t.RoomNumber, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note, items = items.Where(i => i.TaskId == t.Id).Select(i => new { i.Id, i.ChecklistCode, i.Label, i.IsRequired, i.IsDone }) }));
+    var photos = await db.HousekeepingTaskMedia.Where(m => ids.Contains(m.TaskId)).GroupBy(m => m.TaskId).Select(g => new { TaskId = g.Key, Count = g.Count() }).ToListAsync();
+    return Results.Ok(rows.Select(t => new { t.Id, t.RoomId, t.RoomNumber, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note, photoCount = photos.FirstOrDefault(p => p.TaskId == t.Id)?.Count ?? 0, items = items.Where(i => i.TaskId == t.Id).Select(i => new { i.Id, i.ChecklistCode, i.Label, i.IsRequired, i.IsDone }) }));
 });
 api.MapPatch("/housekeeping-tasks/{id:int}", async (int id, HousekeepingTaskInput req, ClaimsPrincipal user, PmsDbContext db) => {
     var task = await db.HousekeepingTasks.FindAsync(id);
@@ -533,6 +549,7 @@ api.MapPost("/shifts/{id:int}/close", async (int id, ShiftCloseInput req, Claims
     var shift = await db.Shifts.FindAsync(id); if (shift == null) return Results.NotFound();
     if (!Ops.HasScope(user, shift.PropertyId) || (shift.UserId != Ops.UserId(user) && !Ops.CanManageFinance(user))) return Results.Forbid();
     if (shift.Status != "OPEN" || req.ClosingAmount < 0) return Ops.Conflict("Ca đã khóa hoặc số tiền không hợp lệ");
+    if (!await ShiftHandoverEndpoints.IsAcknowledged(db, shift.Id)) return Ops.Conflict("Cần người nhận xác nhận sổ giao ca trước khi đóng ca");
     shift.Status = "CLOSED"; shift.ClosingAmount = req.ClosingAmount; shift.Note = req.Note; shift.ClosedAtUtc = DateTime.UtcNow;
     await db.SaveChangesAsync(); await Ops.Log(db, user, shift.PropertyId, "SHIFT_CLOSE", "CashShift", shift.Id);
     return Results.Ok(shift);
@@ -697,11 +714,13 @@ app.MapPricingV4();
 app.MapNightAuditV4();
 app.MapV5Foundation();
 app.MapV5Closeout();
+app.MapShiftHandover();
 app.MapOtaIntegration();
 app.Run();
 
 public record LoginRequest(string Email, string Password);
-public record PropertyInput(string Code, string Name, string? City, string? Address, string? Phone);
+public record PropertyInput(string Code, string Name, string? City, string? Address, string? Phone, string? Fax = null, string? Email = null, string? Website = null);
+public record PropertyContactInput(string? Fax, string? Email, string? Website);
 public record UserInput(int? PropertyId, string FullName, string Email, string Password, string Role);
 public record UserUpdateInput(int? PropertyId, string FullName, string Email, string? Password, string Role, bool IsActive);
 public record RoomTypeInput(int PropertyId, string Code, string Name, int Capacity, decimal BaseRate,
@@ -766,12 +785,12 @@ public static class Ops
         var method = context.HttpContext.Request.Method;
         var commonReads = method == "GET" && new[] { "/api/properties", "/api/dashboard", "/api/rooms", "/api/room-types" }.Contains(path);
         var allowed = role switch {
-            "SALES_AGENT" => commonReads || (method == "GET" && new[] { "/api/availability", "/api/guests", "/api/reservations", "/api/agencies", "/api/rate-plans" }.Contains(path)) ||
+            "SALES_AGENT" => commonReads || (method == "GET" && new[] { "/api/availability", "/api/guests", "/api/reservations", "/api/agencies", "/api/rate-plans", "/api/booking-note-types" }.Contains(path)) ||
                 (method == "POST" && (path is "/api/reservations" or "/api/group-bookings" || Regex.IsMatch(path, @"^/api/reservations/\d+/(cancel|deposit)$"))),
             "HOUSEKEEPING_AGENT" => commonReads || (method == "GET" && path == "/api/housekeeping-tasks") || (method == "PATCH" && Regex.IsMatch(path, @"^/api/(rooms/\d+/housekeeping|housekeeping-tasks/\d+|housekeeping-task-items/\d+)$")) || (method == "POST" && Regex.IsMatch(path, @"^/api/housekeeping-tasks/\d+/(submit|media)$")),
             "MAINTENANCE_AGENT" => commonReads || (method == "PATCH" && Regex.IsMatch(path, @"^/api/rooms/\d+/maintenance$")),
-            "ACCOUNTING_AGENT" => commonReads || (method == "GET" && (new[] { "/api/reservations", "/api/stays", "/api/services", "/api/shifts", "/api/agencies", "/api/reports/summary", "/api/reports/chain", "/api/reports/stock", "/api/reports/stock-card", "/api/reports/cash-ledger", "/api/reports/receipts", "/api/vouchers", "/api/debts", "/api/daily-closes" }.Contains(path) || Regex.IsMatch(path, @"^/api/(stays/\d+/folio|shifts/\d+/reconcile)$"))) ||
-                (method == "POST" && (path is "/api/shifts/open" or "/api/vouchers" or "/api/daily-closes" || Regex.IsMatch(path, @"^/api/(shifts/\d+/close|reservations/\d+/deposit|stays/\d+/(payments|checkout))$"))),
+            "ACCOUNTING_AGENT" => commonReads || (method == "GET" && (new[] { "/api/reservations", "/api/stays", "/api/services", "/api/shifts", "/api/agencies", "/api/reports/summary", "/api/reports/chain", "/api/reports/stock", "/api/reports/stock-card", "/api/reports/cash-ledger", "/api/reports/receipts", "/api/vouchers", "/api/debts", "/api/daily-closes", "/api/shift-handovers", "/api/shift-handover-receivers" }.Contains(path) || Regex.IsMatch(path, @"^/api/(stays/\d+/folio|shifts/\d+/reconcile|shifts/\d+/handover-preview|shift-handovers/\d+)$"))) ||
+                (method == "POST" && (path is "/api/shifts/open" or "/api/vouchers" or "/api/daily-closes" || Regex.IsMatch(path, @"^/api/(shifts/\d+/close|shifts/\d+/handover|shift-handovers/\d+/(acknowledge|notes)|reservations/\d+/deposit|stays/\d+/(payments|checkout))$"))),
             _ => false
         };
         return allowed ? await next(context) : Results.Forbid();
@@ -779,6 +798,14 @@ public static class Ops
     public static Task<bool> OtaPendingConfirmation(PmsDbContext db, int reservationId) =>
         db.ChannelBookings.AnyAsync(x => x.ReservationId == reservationId && x.Status == "PENDING_CONFIRMATION");
     public static IResult Fail(string msg) => Results.BadRequest(new { message = msg });
+    public static (string? Fax, string? Email, string? Website, string? Error) ReadContact(string? fax, string? email, string? website)
+    {
+        fax = TrimOrNull(fax); email = TrimOrNull(email); website = TrimOrNull(website);
+        if (fax?.Length > 30) return (null, null, null, "Số fax tối đa 30 ký tự");
+        if (email != null && (email.Length > 120 || !email.Contains('@'))) return (null, null, null, "Email cơ sở không hợp lệ");
+        if (website?.Length > 200) return (null, null, null, "Website tối đa 200 ký tự");
+        return (fax, email, website, null);
+    }
     public static IResult Conflict(string msg) => Results.Conflict(new { message = msg });
     public static Task<bool> IsBooked(PmsDbContext db, int roomId, DateOnly start, DateOnly end) =>
         db.Reservations.AnyAsync(r => r.RoomId == roomId && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN") && r.CheckInDate < end && r.CheckOutDate > start);

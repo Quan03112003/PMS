@@ -487,7 +487,7 @@ public static class AdvancedEndpoints
             if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
             if (from > to || to.DayNumber - from.DayNumber > 366) return Ops.Fail("Khoảng ngày không hợp lệ");
             var property = await db.Properties.Where(x => x.Id == propertyId)
-                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone, x.TimeZoneId }).FirstOrDefaultAsync();
+                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone, x.Fax, x.Email, x.Website, x.TimeZoneId }).FirstOrDefaultAsync();
             if (property == null) return Results.NotFound();
             TimeZoneInfo zone;
             try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(property.TimeZoneId) ? "Asia/Ho_Chi_Minh" : property.TimeZoneId); }
@@ -523,7 +523,7 @@ public static class AdvancedEndpoints
             var payMethod = string.IsNullOrWhiteSpace(method) ? null : method.Trim().ToUpperInvariant();
             if (payMethod != null && !Ops.PayMethods.Contains(payMethod)) return Ops.Fail("Phương thức thanh toán không hợp lệ");
             var property = await db.Properties.Where(x => x.Id == propertyId)
-                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone, x.TimeZoneId }).FirstOrDefaultAsync();
+                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone, x.Fax, x.Email, x.Website, x.TimeZoneId }).FirstOrDefaultAsync();
             if (property == null) return Results.NotFound();
             TimeZoneInfo zone;
             try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(property.TimeZoneId) ? "Asia/Ho_Chi_Minh" : property.TimeZoneId); }
@@ -582,7 +582,7 @@ public static class AdvancedEndpoints
             if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
             if (from > to || to.DayNumber - from.DayNumber > 366) return Ops.Fail("Khoảng ngày không hợp lệ");
             var property = await db.Properties.Where(x => x.Id == propertyId)
-                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone }).FirstOrDefaultAsync();
+                .Select(x => new { x.Code, x.Name, x.Address, x.City, x.Phone, x.Fax, x.Email, x.Website }).FirstOrDefaultAsync();
             if (property == null) return Results.NotFound();
             var needle = name?.Trim();
             var stays = await (from r in db.Reservations

@@ -46,6 +46,18 @@ public static class V5Closeout
             await Ops.Log(db, actor, req.PropertyId, "NOTE_TYPE_CREATE", "BookingNoteType", row.Id, code);
             return Results.Ok(row);
         });
+        api.MapPatch("/booking-note-types/{id:int}", async (int id, NoteTypeRequiredInput req, ClaimsPrincipal actor, PmsDbContext db) =>
+        {
+            if (!Ops.CanManage(actor)) return Results.Forbid();
+            var row = await db.BookingNoteTypes.FindAsync(id);
+            if (row == null) return Results.NotFound();
+            if (row.PropertyId is int propertyId && !Ops.HasScope(actor, propertyId)) return Results.Forbid();
+            row.IsRequired = req.IsRequired;
+            await db.SaveChangesAsync();
+            if (row.PropertyId is int loggedPropertyId)
+                await Ops.Log(db, actor, loggedPropertyId, "NOTE_TYPE_REQUIRED", "BookingNoteType", row.Id, req.IsRequired ? "REQUIRED" : "OPTIONAL");
+            return Results.Ok(new { row.Id, row.IsRequired });
+        });
         api.MapGet("/reservations/{id:int}/notes", async (int id, ClaimsPrincipal actor, PmsDbContext db) =>
         {
             var reservation = await db.Reservations.FindAsync(id);
@@ -230,6 +242,7 @@ public static class V5Closeout
             if (task == null) return Results.NotFound();
             if (!Ops.HasScope(actor, task.PropertyId)) return Results.Forbid();
             if (await db.HousekeepingTaskItems.AnyAsync(x => x.TaskId == id && x.IsRequired && !x.IsDone)) return Ops.Fail("Còn hạng mục bắt buộc chưa xong");
+            if (!await db.HousekeepingTaskMedia.AnyAsync(x => x.TaskId == id)) return Ops.Fail("Cần ảnh nghiệm thu trước khi trả phòng về sẵn sàng");
             task.Status = "FINISH"; task.InspectorName = actor.FindFirstValue(ClaimTypes.Name); task.FinishedAtUtc ??= DateTime.UtcNow;
             var room = await db.Rooms.FindAsync(task.RoomId);
             if (room != null) room.HousekeepingStatus = "INSPECTED";
@@ -313,13 +326,6 @@ public static class V5Closeout
             foreach (var stay in stays)
             {
                 if (await db.NightAuditLines.AnyAsync(x => x.ReservationId == stay.Id && x.BusinessDate == req.BusinessDate)) { skipped++; continue; }
-                var packaged = await db.Charges.AnyAsync(x => x.ReservationId == stay.Id && x.Category == "ROOM" && x.BusinessDate == null);
-                if (packaged)
-                {
-                    db.NightAuditLines.Add(new NightAuditLine { NightAuditLogId = log.Id, ReservationId = stay.Id, BusinessDate = req.BusinessDate, Action = "SKIP_PACKAGED", Amount = 0 });
-                    skipped++;
-                    continue;
-                }
                 var charge = new FolioCharge
                 {
                     ReservationId = stay.Id, Category = "ROOM", Description = $"Tiền phòng đêm {req.BusinessDate:dd/MM/yyyy}",
@@ -449,9 +455,9 @@ public static class V5Closeout
             var rooms = await db.Rooms.CountAsync(x => x.PropertyId == propertyId && !x.IsOutOfOrder);
             var inHouse = await db.Reservations.CountAsync(x => x.PropertyId == propertyId && x.Status == "CHECKED_IN");
             var occupancy = rooms == 0 ? 0 : Math.Round(100m * inHouse / rooms, 1);
-            var start = today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var (start, end) = PropertyDayRangeUtc(property.TimeZoneId, today);
             var ids = db.Reservations.Where(r => r.PropertyId == propertyId).Select(r => r.Id);
-            var revenue = await db.Charges.Where(x => ids.Contains(x.ReservationId) && x.PostedAtUtc >= start && x.PostedAtUtc < start.AddDays(1) && x.Category == "ROOM").SumAsync(x => (decimal?)x.Amount) ?? 0;
+            var revenue = await db.Charges.Where(x => ids.Contains(x.ReservationId) && x.PostedAtUtc >= start && x.PostedAtUtc < end && x.Category == "ROOM").SumAsync(x => (decimal?)x.Amount) ?? 0;
             var stock = await db.Services.Where(x => x.PropertyId == propertyId && x.TrackInventory && x.MinStock > 0 && x.StockQuantity <= x.MinStock)
                 .Select(x => new { x.Id, x.Name, x.StockQuantity, x.MinStock }).ToListAsync();
             var alerts = new List<object>();
@@ -497,13 +503,22 @@ public static class V5Closeout
         });
     }
 
-    public static DateOnly PropertyToday(string? timeZoneId)
+    public static DateOnly PropertyToday(string? timeZoneId) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, PropertyZone(timeZoneId)));
+
+    public static (DateTime StartUtc, DateTime EndUtc) PropertyDayRangeUtc(string? timeZoneId, DateOnly day)
     {
-        TimeZoneInfo zone;
-        try { zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(timeZoneId) ? "Asia/Ho_Chi_Minh" : timeZoneId); }
+        var zone = PropertyZone(timeZoneId);
+        var startLocal = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        var endLocal = DateTime.SpecifyKind(day.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        return (TimeZoneInfo.ConvertTimeToUtc(startLocal, zone), TimeZoneInfo.ConvertTimeToUtc(endLocal, zone));
+    }
+
+    static TimeZoneInfo PropertyZone(string? timeZoneId)
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(timeZoneId) ? "Asia/Ho_Chi_Minh" : timeZoneId); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
-        { zone = TimeZoneInfo.CreateCustomTimeZone("VN", TimeSpan.FromHours(7), "VN", "VN"); }
-        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone));
+        { return TimeZoneInfo.CreateCustomTimeZone("VN", TimeSpan.FromHours(7), "VN", "VN"); }
     }
 
     public static async Task EnsureCleaningTask(PmsDbContext db, Room room, string kind)
@@ -567,6 +582,7 @@ public static class V5Closeout
 }
 
 public record NoteTypeInput(int PropertyId, string Code, string Name, bool IsRequired, int SortOrder);
+public record NoteTypeRequiredInput(bool IsRequired);
 public record ReservationNoteInput(int NoteTypeId, string? NoteText);
 public record DepositTermsInput(decimal Amount, DateTime? DueAtUtc, string? PolicyCode);
 public record HoldInput(int PropertyId, int RoomId, string GuestName, string? GuestPhone, DateOnly CheckInDate, DateOnly CheckOutDate, int HoldMinutes, string? IdempotencyKey);
