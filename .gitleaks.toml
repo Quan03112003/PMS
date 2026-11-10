@@ -1,0 +1,23 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "postgres-connection-uri"
+description = "PostgreSQL / Neon connection URI with inline password"
+regex = '''postgres(?:ql)?://[^:\s"'<>]+:([^@\s"'<>]{6,})@[^\s"'<>]+'''
+secretGroup = 1
+keywords = ["postgres://", "postgresql://"]
+
+[[rules]]
+id = "neon-password"
+description = "Neon database password"
+regex = '''\b(npg_[A-Za-z0-9]{8,})\b'''
+secretGroup = 1
+keywords = ["npg_"]
+
+[allowlist]
+description = "Sample idempotency keys (UUIDs) in API request examples are not credentials"
+regexTarget = "line"
+regexes = [
+  '''"idempotencyKey":\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"''',
+]

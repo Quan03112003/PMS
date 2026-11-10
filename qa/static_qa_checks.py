@@ -40,6 +40,7 @@ configs=['frontend/package.json','frontend/angular.json','frontend/tsconfig.json
          'backend/HotelPms.Api/appsettings.json','backend/HotelPms.Api/appsettings.Development.json']
 config_issues=[]
 for file in configs:
+    if file.endswith('appsettings.Development.json') and not (P/file).exists(): continue
     try: json.loads((P/file).read_text(encoding='utf-8'))
     except Exception as exc: config_issues.append(file+': '+str(exc))
 report={'backendRoutes':len(api),'frontendDirectCallsMatched':len(ui)-len(missing),
