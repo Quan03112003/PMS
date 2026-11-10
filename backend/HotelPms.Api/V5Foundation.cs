@@ -221,6 +221,7 @@ public static class V5Foundation
             await Ops.LockReservation(db, id);
             var reservation = await db.Reservations.FirstAsync(x => x.Id == id);
             if (reservation.Status != "CONFIRMED") return Ops.Conflict("Chỉ đổi bảng giá trước khi nhận phòng");
+            if (await Ops.OtaPendingConfirmation(db, id)) return Ops.Conflict("Booking OTA chưa hoàn tất xác nhận 2 lớp");
             var before = $"{reservation.RatePlanId?.ToString() ?? "none"}@{reservation.NightlyRate}";
             reservation.RatePlanId = plan.Id;
             reservation.NightlyRate = plan.BasePrice;

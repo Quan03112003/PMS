@@ -61,11 +61,14 @@ export class AdvancedComponent implements OnChanges {
     debts: 'Công nợ khách hàng', assets: 'Tài sản khách gửi', dayclose: 'Snapshot chốt ngày',
     chain: 'Tổng hợp toàn chuỗi', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
     pricingQuote: 'Báo giá & phụ thu',
-    adjustmentVouchers: 'Phiếu điều chỉnh',
-    nightAudit: 'Chốt đêm',
+    adjustmentVouchers: 'Phiếu điều chỉnh folio',
     taxRules: 'Quy tắc thuế',
-    eInvoices: 'Hóa đơn điện tử'
+    holidayRates: 'Giá lễ tết & cao điểm',
+    eInvoices: 'Hóa đơn điện tử (nháp)'
   };
+  voucherStatus = '';
+  voucherKinds: Record<string, string> = { MANUAL_ADJUSTMENT: 'Điều chỉnh thủ công', CORRECTION: 'Sửa sai', WAIVER: 'Miễn giảm', REVERSAL: 'Đảo dòng folio' };
+  voucherStatuses: Record<string, string> = { PENDING: 'Chờ duyệt', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', POSTED: 'Đã ghi sổ' };
   constructor(private api: ApiService) { this.resetForm(); }
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
   get canManageFinance(): boolean { return this.canManage || this.user?.role === 'ACCOUNTING_AGENT'; }
@@ -83,7 +86,10 @@ export class AdvancedComponent implements OnChanges {
     this.form = { propertyId: this.propertyId, checkInDate: day(), checkOutDate: day(1), businessDate: day(),
       type: 'IN', method: 'TRANSFER', paymentMethod: 'TRANSFER', quantity: 1, quantityChange: 1,
       unitCost: 0, amount: 0, includedHours: 2, basePrice: 0, extraHourPrice: 0,
-      mode: 'OVERNIGHT', adults: 1, roomTypeId: null, supplierId: null };
+      mode: 'OVERNIGHT', adults: 1, roomTypeId: null, supplierId: null,
+      kind: 'MANUAL_ADJUSTMENT', amountDelta: 0, reason: '', stayId: 0, originalChargeId: null,
+      taxType: 'VAT', ratePercent: 8, isInclusive: true, appliesTo: 'ALL', effectiveFrom: day(), effectiveTo: '',
+      dateFrom: day(), dateTo: day(), adjustmentPercent: 0, customerName: '', customerTaxId: '', totalAmount: 0, taxAmount: 0 };
   }
   fetch(path: string, field = 'items'): void {
     this.api.get<any>(path).subscribe({ next: x => (this as any)[field] = x,
@@ -94,8 +100,11 @@ export class AdvancedComponent implements OnChanges {
     const paths: Record<string, string> = {
       waitlist: '/waitlist', groups: '/groups', rates: '/rate-plans', buildings: '/buildings',
       stockledger: '/stock/movements', suppliers: '/suppliers', retail: '/retail-sales',
-      vouchers: '/vouchers', debts: '/debts', assets: '/guest-assets', dayclose: '/daily-closes'
+      vouchers: '/vouchers', debts: '/debts', assets: '/guest-assets', dayclose: '/daily-closes',
+      taxRules: '/tax-rules', holidayRates: '/holiday-rates', eInvoices: '/e-invoices'
     };
+    if (this.view === 'adjustmentVouchers') this.fetch(`/adjustment-vouchers?propertyId=${id}${this.voucherStatus ? '&status=' + this.voucherStatus : ''}`);
+    if (['adjustmentVouchers', 'eInvoices'].includes(this.view)) this.fetch(`/stays?propertyId=${id}`, 'stays');
     if (paths[this.view]) this.fetch(`${paths[this.view]}?propertyId=${id}`);
     if (['waitlist', 'groups', 'buildings'].includes(this.view)) this.fetch(`/rooms?propertyId=${id}`, 'rooms');
     if (['waitlist', 'groups'].includes(this.view)) this.fetch(`/room-types?propertyId=${id}`, 'buildings');
@@ -231,5 +240,42 @@ export class AdvancedComponent implements OnChanges {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = 'bao-cao-chuoi.csv'; a.click(); URL.revokeObjectURL(url);
   }
+  selectVoucherStay(stayId: number): void {
+    this.form.stayId = +stayId; this.form.originalChargeId = null; this.folio = null;
+    if (stayId) this.api.get(`/stays/${stayId}/folio`).subscribe({ next: x => this.folio = x, error: e => this.error = e?.error?.message || 'Không tải được folio' });
+  }
+  pickOriginalCharge(chargeId: any): void {
+    this.form.originalChargeId = chargeId ? +chargeId : null;
+    const charge = this.folio?.charges?.find((c: any) => c.id === this.form.originalChargeId);
+    if (charge && this.form.kind === 'REVERSAL') this.form.amountDelta = -charge.amount;
+  }
+  createAdjustmentVoucher(): void {
+    const stay = this.stays.find(s => s.id === this.form.stayId);
+    if (!stay) { this.error = 'Chọn khách đang ở cần điều chỉnh folio'; return; }
+    this.submit('/adjustment-vouchers', { propertyId: +this.propertyId, reservationId: stay.reservationId, originalChargeId: this.form.originalChargeId || null,
+      kind: this.form.kind, amountDelta: +this.form.amountDelta, reason: this.form.reason || '', idempotencyKey: crypto.randomUUID() }, () => this.folio = null);
+  }
+  voucherAction(v: any, action: 'approve' | 'post' | 'reject'): void {
+    if (action === 'reject') {
+      const reason = prompt(`Lý do từ chối phiếu ${v.code}:`);
+      if (!reason?.trim()) return;
+      this.submit(`/adjustment-vouchers/${v.id}/reject`, { reason });
+    } else this.submit(`/adjustment-vouchers/${v.id}/${action}`, {});
+  }
+  createTaxRule(): void {
+    this.submit('/tax-rules', { propertyId: +this.propertyId, code: this.form.code, name: this.form.name, taxType: this.form.taxType,
+      ratePercent: +this.form.ratePercent, isInclusive: !!this.form.isInclusive, appliesTo: this.form.appliesTo,
+      effectiveFrom: this.form.effectiveFrom, effectiveTo: this.form.effectiveTo || null });
+  }
+  createHolidayRate(): void {
+    this.submit('/holiday-rates', { propertyId: +this.propertyId, code: this.form.code, name: this.form.name,
+      dateFrom: this.form.dateFrom, dateTo: this.form.dateTo, adjustmentPercent: +this.form.adjustmentPercent });
+  }
+  createEInvoice(): void {
+    const stay = this.stays.find(s => s.id === +this.form.stayId);
+    this.submit('/e-invoices', { propertyId: +this.propertyId, reservationId: stay?.reservationId ?? null, customerName: this.form.customerName,
+      customerTaxId: this.form.customerTaxId || null, totalAmount: +this.form.totalAmount, taxAmount: +this.form.taxAmount });
+  }
+  sendEInvoice(id: number): void { this.submit(`/e-invoices/${id}/send`, {}); }
   currency(n: number): string { return (n || 0).toLocaleString('vi-VN') + ' ₫'; }
 }

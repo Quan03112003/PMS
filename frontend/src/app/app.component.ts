@@ -1,17 +1,21 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { AdvancedComponent } from './advanced.component';
+import { OtaComponent } from './ota.component';
+import { RoadmapComponent } from './roadmap.component';
 
-@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, AdvancedComponent], templateUrl: './app.component.html' })
-export class AppComponent implements OnInit {
+@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, AdvancedComponent, OtaComponent, RoadmapComponent], templateUrl: './app.component.html' })
+export class AppComponent implements OnInit, OnDestroy {
   user: any = null;
   token = '';
   loginEmail = 'reception@pms.local';
   loginPassword = 'Demo@12345';
   loginBusy = false;
+  clockNow = new Date();
+  private clockTimer: ReturnType<typeof setInterval> | null = null;
   view = 'dashboard';
   properties: any[] = [];
   propertyId = 0;
@@ -42,50 +46,94 @@ export class AppComponent implements OnInit {
   reportFrom = localIsoDate(-7);
   reportTo = localIsoDate(0);
   sidebarOpen = false;
+  bookingLayout: 'list' | 'tape' = 'list';
+  tapeStart = localIsoDate(0);
+  housekeepingTasks: any[] = [];
+  priceQuote: any = null;
+  priceTouched = false;
+  deskNotes: any[] = [];
+  deskNoteText = '';
+  roomMenu: any = null;
 
-  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','agencyReports','shiftReconcile','registration','pricingQuote'];
+  advancedViews = ['waitlist','groups','transfers','rates','buildings','stockledger','suppliers','retail','vouchers','debts','assets','dayclose','chain','agencyReports','shiftReconcile','registration','pricingQuote',
+    'adjustmentVouchers','taxRules','holidayRates','eInvoices'];
 
-  menuGroups = [
-    { title: 'TỔNG QUAN', items: [{ id: 'dashboard', label: 'Bảng điều khiển', icon: '◫' }] },
-    { title: 'LỄ TÂN', items: [
-      { id: 'roommap', label: 'Sơ đồ phòng', icon: '▦' },
-      { id: 'bookings', label: 'Đặt phòng', icon: '▤' },
-      { id: 'pricingQuote', label: 'Báo giá & phụ thu', icon: '₫' },
-      { id: 'groups', label: 'Khách đoàn', icon: '▦' },
-      { id: 'waitlist', label: 'Phòng hàng đợi', icon: '◷' },
-      { id: 'transfers', label: 'Chuyển dịch vụ', icon: '⇆' },
-      { id: 'debts', label: 'Công nợ / khôi phục', icon: '₫' },
-      { id: 'assets', label: 'Tài sản khách', icon: '◈' },
-      { id: 'stays', label: 'Khách đang ở', icon: '♙' },
-      { id: 'housekeeping', label: 'Buồng phòng', icon: '✧' },
-      { id: 'shifts', label: 'Ca thu ngân', icon: '◷' }
+  // Branch codes follow the requirement groups (A–I) of docs/LOTUS_PMS_V4_DoiChieu.xlsx.
+  menuTree: MenuNode[] = [
+    { id: 'dashboard', label: 'Bảng điều khiển', icon: 'dash' },
+    { key: 'A', code: 'A', label: 'Đặt phòng & lễ tân', icon: 'desk', children: [
+      { key: 'A1', code: 'A1', label: 'Đặt phòng', children: [
+        { id: 'bookings', label: 'Danh sách đặt phòng' },
+        { id: 'pricingQuote', label: 'Báo giá & phụ thu' },
+        { id: 'waitlist', label: 'Phòng hàng đợi' },
+        { id: 'groups', label: 'Khách đoàn' }
+      ] },
+      { key: 'A2', code: 'A2', label: 'Lưu trú', children: [
+        { id: 'roommap', label: 'Sơ đồ phòng' },
+        { id: 'stays', label: 'Khách đang ở' },
+        { id: 'transfers', label: 'Chuyển dịch vụ' },
+        { id: 'assets', label: 'Tài sản khách gửi' },
+        { id: 'registration', label: 'Danh sách lưu trú' }
+      ] }
     ] },
-    { title: 'QUẢN LÝ', items: [
-      { id: 'properties', label: 'Cơ sở khách sạn', icon: '⌂' },
-      { id: 'manageRooms', label: 'Phòng & hạng phòng', icon: '▧' },
-      { id: 'buildings', label: 'Tòa nhà', icon: '▥' },
-      { id: 'rates', label: 'Bảng giá giờ/ngày/đêm', icon: '₫' },
-      { id: 'users', label: 'Nhân viên & quyền', icon: '♟' },
-      { id: 'services', label: 'Dịch vụ & minibar', icon: '◈' },
-      { id: 'stockledger', label: 'Nhập xuất tồn kho', icon: '▤' },
-      { id: 'suppliers', label: 'Nhà cung cấp', icon: '◇' },
-      { id: 'retail', label: 'Bán hàng ngoài phòng', icon: '♧' },
-      { id: 'vouchers', label: 'Phiếu thu / phiếu chi', icon: '▣' },
-      { id: 'guests', label: 'Khách hàng', icon: '♧' },
-      { id: 'agencies', label: 'Đại lý & kênh', icon: '◇' },
-      { id: 'reports', label: 'Báo cáo doanh thu', icon: '▥' },
-      { id: 'chain', label: 'Báo cáo chuỗi', icon: '▦' },
-      { id: 'agencyReports', label: 'Hiệu quả đại lý', icon: '◇' },
-      { id: 'shiftReconcile', label: 'Đối soát ca', icon: '₫' },
-      { id: 'registration', label: 'Danh sách lưu trú', icon: '▤' },
-      { id: 'dayclose', label: 'Snapshot chốt ngày', icon: '◷' },
-      { id: 'audit', label: 'Nhật ký thao tác', icon: '☷' }
+    { key: 'B', code: 'B', label: 'Kênh bán OTA & đại lý', icon: 'ota', children: [
+      { id: 'ota', label: 'Kết nối OTA' },
+      { id: 'agencies', label: 'Đại lý & kênh' },
+      { id: 'agencyReports', label: 'Hiệu quả đại lý' }
+    ] },
+    { key: 'C', code: 'C', label: 'Giá & khuyến mại', icon: 'rate', children: [
+      { id: 'rates', label: 'Bảng giá giờ/ngày/đêm' },
+      { id: 'holidayRates', label: 'Giá lễ tết & cao điểm' },
+      { id: 'taxRules', label: 'Quy tắc thuế' }
+    ] },
+    { key: 'D', code: 'D', label: 'Thanh toán & công nợ', icon: 'cash', children: [
+      { key: 'D1', code: 'D1', label: 'Thu ngân', children: [
+        { id: 'shifts', label: 'Ca thu ngân' },
+        { id: 'shiftReconcile', label: 'Đối soát ca' },
+        { id: 'vouchers', label: 'Phiếu thu / phiếu chi' }
+      ] },
+      { key: 'D2', code: 'D2', label: 'Công nợ & điều chỉnh', children: [
+        { id: 'debts', label: 'Công nợ / khôi phục' },
+        { id: 'adjustmentVouchers', label: 'Phiếu điều chỉnh folio' },
+        { id: 'eInvoices', label: 'Hóa đơn điện tử (nháp)' }
+      ] }
+    ] },
+    { key: 'E', code: 'E', label: 'Buồng phòng & dịch vụ', icon: 'hk', children: [
+      { id: 'housekeeping', label: 'Buồng phòng' },
+      { id: 'services', label: 'Dịch vụ & minibar' },
+      { id: 'retail', label: 'Bán hàng ngoài phòng' }
+    ] },
+    { key: 'F', code: 'F', label: 'Kho & nhà cung cấp', icon: 'stock', children: [
+      { id: 'stockledger', label: 'Nhập xuất tồn kho' },
+      { id: 'suppliers', label: 'Nhà cung cấp' }
+    ] },
+    { key: 'G', code: 'G', label: 'Khách hàng', icon: 'guest', children: [
+      { id: 'guests', label: 'Hồ sơ khách hàng' }
+    ] },
+    { key: 'H', code: 'H', label: 'Báo cáo', icon: 'report', children: [
+      { id: 'reports', label: 'Báo cáo doanh thu' },
+      { id: 'chain', label: 'Báo cáo chuỗi' },
+      { id: 'dayclose', label: 'Snapshot chốt ngày' }
+    ] },
+    { key: 'I', code: 'I', label: 'Hệ thống', icon: 'sys', children: [
+      { key: 'I1', code: 'I1', label: 'Cơ sở & phòng', children: [
+        { id: 'properties', label: 'Cơ sở khách sạn' },
+        { id: 'manageRooms', label: 'Phòng & hạng phòng' },
+        { id: 'buildings', label: 'Tòa nhà' }
+      ] },
+      { id: 'users', label: 'Nhân viên & quyền' },
+      { id: 'audit', label: 'Nhật ký thao tác' },
+      { id: 'roadmap', label: 'Lộ trình yêu cầu' }
     ] }
   ];
+  openBranches = new Set<string>(JSON.parse(localStorage.getItem('pms_menu_open') || '[]'));
+  menuSearch = '';
 
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
+    this.expandTo(this.view);
+    this.clockTimer = setInterval(() => { this.clockNow = new Date(); }, 1000);
     const token = localStorage.getItem('pms_token');
     const storedUser = localStorage.getItem('pms_user');
     if (token && storedUser) {
@@ -94,14 +142,18 @@ export class AppComponent implements OnInit {
     }
   }
 
+  ngOnDestroy(): void {
+    if (this.clockTimer) clearInterval(this.clockTimer);
+  }
+
   get isManager(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
   get isChainAdmin(): boolean { return this.user?.role === 'CHAIN_ADMIN'; }
   get canMaintain(): boolean { return this.isManager || this.user?.role === 'MAINTENANCE_AGENT'; }
   canView(itemId: string): boolean {
     if (this.isManager) return itemId !== 'properties' || this.isChainAdmin;
     const roleViews: Record<string, string[]> = {
-      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests','pricingQuote'],
-      SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates','pricingQuote'],
+      FRONT_DESK_AGENT: ['dashboard','roommap','bookings','groups','waitlist','transfers','debts','assets','stays','housekeeping','shifts','guests','pricingQuote','ota'],
+      SALES_AGENT: ['dashboard','roommap','bookings','guests','agencies','rates','pricingQuote','ota','agencyReports'],
       HOUSEKEEPING_AGENT: ['dashboard','roommap','housekeeping'],
       MAINTENANCE_AGENT: ['dashboard','roommap','housekeeping','manageRooms'],
       ACCOUNTING_AGENT: ['dashboard','bookings','stays','shifts','vouchers','debts','reports','dayclose','shiftReconcile','guests']
@@ -168,14 +220,37 @@ export class AppComponent implements OnInit {
     }, error: e => this.onError(e) });
   }
   changeProperty(): void { this.propertyId = Number(this.propertyId); localStorage.setItem('pms_property', String(this.propertyId)); this.floor = 0; this.refresh(); }
-  setView(v: string): void { this.view = v; this.sidebarOpen = false; this.filter = ''; this.refresh(); }
+  setView(v: string): void { this.view = v; this.sidebarOpen = false; this.filter = ''; this.expandTo(v); this.refresh(); }
+  nodeVisible(node: MenuNode): boolean {
+    if (node.children) return node.children.some(c => this.nodeVisible(c));
+    if (!this.canView(node.id!)) return false;
+    const q = this.menuSearch.trim().toLowerCase();
+    return !q || node.label.toLowerCase().includes(q);
+  }
+  get anyMenuMatch(): boolean { return this.menuTree.some(n => this.nodeVisible(n)); }
+  isOpen(node: MenuNode): boolean { return !!this.menuSearch.trim() || this.openBranches.has(node.key!); }
+  toggleBranch(node: MenuNode): void {
+    if (this.openBranches.has(node.key!)) this.openBranches.delete(node.key!); else this.openBranches.add(node.key!);
+    localStorage.setItem('pms_menu_open', JSON.stringify([...this.openBranches]));
+  }
+  branchActive(node: MenuNode): boolean { return !!node.children?.some(c => c.id === this.view || this.branchActive(c)); }
+  private expandTo(viewId: string, nodes = this.menuTree): boolean {
+    for (const n of nodes) {
+      if (n.id === viewId) return true;
+      if (n.children && this.expandTo(viewId, n.children)) { this.openBranches.add(n.key!); return true; }
+    }
+    return false;
+  }
+  private leaves(nodes = this.menuTree): MenuNode[] { return nodes.flatMap(n => n.children ? this.leaves(n.children) : [n]); }
   refresh(): void {
     if (!this.user || !this.propertyId) return;
     const id = this.propertyId;
     this.api.get(`/dashboard?propertyId=${id}`).subscribe({ next: r => this.dashboard = r, error: e => this.onError(e) });
     this.api.get<any[]>(`/rooms?propertyId=${id}`).subscribe({ next: r => this.rooms = r, error: e => this.onError(e) });
     this.api.get<any[]>(`/room-types?propertyId=${id}`).subscribe({ next: r => this.roomTypes = r, error: e => this.onError(e) });
-    if (['bookings', 'dashboard'].includes(this.view) && this.canView('bookings')) this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
+    if (['bookings', 'dashboard', 'roommap'].includes(this.view) && this.canView('bookings')) this.api.get<any[]>(`/reservations?propertyId=${id}`).subscribe({ next: r => this.bookings = r, error: e => this.onError(e) });
+    if (['housekeeping', 'dashboard'].includes(this.view)) this.api.get<any[]>(`/housekeeping-tasks?propertyId=${id}`).subscribe({ next: r => this.housekeepingTasks = r, error: e => this.onError(e) });
+    if (this.view === 'dashboard') this.api.get<any[]>(`/desk-notes?propertyId=${id}`).subscribe({ next: r => this.deskNotes = r, error: e => this.onError(e) });
     if (['stays', 'dashboard', 'roommap'].includes(this.view) && this.canView('stays')) this.api.get<any[]>(`/stays?propertyId=${id}`).subscribe({ next: r => this.stays = r, error: e => this.onError(e) });
     if (['services', 'stays'].includes(this.view)) this.api.get<any[]>(`/services?propertyId=${id}`).subscribe({ next: r => this.services = r, error: e => this.onError(e) });
     if (this.view === 'users') this.api.get<any[]>(`/users?propertyId=${id}`).subscribe({ next: r => this.users = r, error: e => this.onError(e) });
@@ -185,11 +260,12 @@ export class AppComponent implements OnInit {
     if (this.view === 'audit') this.api.get<any[]>(`/audit?propertyId=${id}`).subscribe({ next: r => this.audits = r, error: e => this.onError(e) });
     if (this.view === 'reports') this.loadReport();
   }
-  title(): string { return this.menuGroups.flatMap(g => g.items).find(i => i.id === this.view)?.label || 'PMS'; }
+  title(): string { return this.leaves().find(i => i.id === this.view)?.label || 'PMS'; }
   statusText(status: string): string {
     const dict: Record<string, string> = { VACANT: 'Phòng trống', OCCUPIED: 'Đang ở', ARRIVAL: 'Khách sắp đến', DIRTY: 'Chưa dọn',
       MAINTENANCE: 'Bảo trì', CLEAN: 'Đã dọn', INSPECTED: 'Sẵn sàng', CONFIRMED: 'Đã xác nhận', CHECKED_IN: 'Đang ở',
-      CHECKED_OUT: 'Đã trả', CANCELLED: 'Đã hủy', OPEN: 'Đang mở', CLOSED: 'Đã khóa', DIRECT: 'Trực tiếp', OTA: 'OTA' };
+      CHECKED_OUT: 'Đã trả', CANCELLED: 'Đã hủy', OPEN: 'Đang mở', CLOSED: 'Đã khóa', DIRECT: 'Trực tiếp', OTA: 'OTA',
+      NEW: 'Đang dọn', PENDING: 'Chờ nghiệm thu', FINISH: 'Đã dọn xong', STAY: 'Dọn lưu', CHECKOUT: 'Dọn checkout' };
     return dict[status] || status;
   }
   badge(status: string): string { return status.toLowerCase().replaceAll('_', '-'); }
@@ -199,23 +275,58 @@ export class AppComponent implements OnInit {
     this.form = { propertyId: this.propertyId, checkInDate: this.today, checkOutDate: localIsoDate(2), adults: 2, children: 0,
       bookingSource: 'DIRECT', bookingMode: 'OVERNIGHT', agencyId: null, selectedRatePlanId: null, nightlyRate: null, price: 0, unit: 'Lần', quantity: 1, trackInventory: false,
       stockQuantity: 0, openingAmount: 0, method: 'CASH', amount: 0, capacity: 2, floor: 1,
+      title: 'Mr', gender: 'Nam', idDocumentType: 'CCCD', stayPurpose: 'Du lịch',
       commissionPercent: 0, ...values };
-    if (type === 'booking') { this.searchAvailable(); this.api.get<any[]>(`/rate-plans?propertyId=${this.propertyId}`).subscribe({next: x => this.ratePlans = x, error: e => this.onError(e)}); this.api.get<any[]>(`/agencies?propertyId=${this.propertyId}`).subscribe({next: x => this.agencies = x, error: e => this.onError(e)}); }
+    if (type === 'booking') {
+      this.priceTouched = false; this.priceQuote = null;
+      this.searchAvailable();
+      this.api.get<any[]>(`/rate-plans?propertyId=${this.propertyId}`).subscribe({next: x => this.ratePlans = x, error: e => this.onError(e)});
+      this.api.get<any[]>(`/agencies?propertyId=${this.propertyId}`).subscribe({next: x => this.agencies = x, error: e => this.onError(e)});
+    }
   }
   searchAvailable(): void {
-    if (!this.form.checkInDate || !this.form.checkOutDate || this.form.checkInDate >= this.form.checkOutDate) { this.availableRooms = []; return; }
+    if (!this.form.checkInDate || !this.form.checkOutDate || this.form.checkInDate >= this.form.checkOutDate) { this.availableRooms = []; this.refreshQuote(); return; }
     const params = `propertyId=${this.propertyId}&startDate=${this.form.checkInDate}&endDate=${this.form.checkOutDate}`;
-    this.api.get<any[]>('/availability?' + params).subscribe({ next: r => this.availableRooms = r, error: e => this.onError(e) });
+    this.api.get<any[]>('/availability?' + params).subscribe({ next: r => { this.availableRooms = r; this.refreshQuote(); }, error: e => this.onError(e) });
   }
-  onBookingRoomChange(): void { if (this.form.selectedRatePlanId) { this.onRatePlanChange(); return; } this.form.nightlyRate = this.availableRooms.find(r => r.id === this.form.roomId)?.baseRate ?? null; }
-  onRatePlanChange(): void { const selected = this.ratePlans.find(x => x.id === +this.form.selectedRatePlanId); if (selected) { this.form.bookingMode = selected.mode; this.form.nightlyRate = selected.basePrice; } }
-  chooseRoom(r: any): void { this.form.roomId = r.id; this.form.nightlyRate = r.baseRate; }
+  onBookingRoomChange(): void { this.refreshQuote(); }
+  onRatePlanChange(): void {
+    const selected = this.ratePlans.find(x => x.id === +this.form.selectedRatePlanId);
+    if (selected) this.form.bookingMode = selected.mode;
+    this.priceTouched = false;
+    this.refreshQuote();
+  }
+  onPriceEdit(value: number): void {
+    if (!this.priceTouched && this.priceQuote && Number(value) === Number(this.priceQuote.roomUnit)) return;
+    this.priceTouched = value === null || value === undefined || (value as any) === '' ? false : true;
+    this.refreshQuote();
+  }
+  refreshQuote(): void {
+    if (this.modal !== 'booking' || !this.form.roomId || !this.form.checkInDate || !this.form.checkOutDate || this.form.checkInDate >= this.form.checkOutDate) { this.priceQuote = null; return; }
+    const payload = {
+      propertyId: this.propertyId, roomId: Number(this.form.roomId), checkInDate: this.form.checkInDate, checkOutDate: this.form.checkOutDate,
+      bookingMode: this.form.bookingMode, adults: Number(this.form.adults || 1), children: Number(this.form.children || 0),
+      plannedHours: this.form.bookingMode === 'HOURLY' && this.form.plannedHours ? Number(this.form.plannedHours) : null,
+      roomRateOverride: this.priceTouched ? Number(this.form.nightlyRate) : null,
+      ratePlanId: this.form.selectedRatePlanId ? Number(this.form.selectedRatePlanId) : null
+    };
+    this.api.post<any>('/pricing/room-quote', payload).subscribe({ next: q => { this.priceQuote = q; if (!this.priceTouched) this.form.nightlyRate = q.roomUnit; }, error: e => this.onError(e) });
+  }
+  chooseRoom(r: any): void { this.form.roomId = r.id; this.refreshQuote(); }
   createBooking(): void {
     if (!this.form.roomId || !this.form.guestName) { this.notice('Vui lòng chọn phòng và nhập tên khách', true); return; }
-    this.run(this.api.post('/reservations', { ...this.form, roomId: Number(this.form.roomId), nightlyRate: Number(this.form.nightlyRate) }),
-      () => this.setView('bookings'), 'Đã tạo và xác nhận đặt phòng');
+    const payload = { ...this.form, roomId: Number(this.form.roomId), adults: Number(this.form.adults || 1), children: Number(this.form.children || 0),
+      nightlyRate: this.priceTouched ? Number(this.form.nightlyRate) : null,
+      ratePlanId: this.form.selectedRatePlanId ? Number(this.form.selectedRatePlanId) : null,
+      plannedHours: this.form.bookingMode === 'HOURLY' && this.form.plannedHours ? Number(this.form.plannedHours) : null };
+    this.run(this.api.post('/reservations', payload), () => this.setView('bookings'), 'Đã tạo và xác nhận đặt phòng');
   }
-  createRoomType(): void { this.run(this.api.post('/room-types', { ...this.form, baseRate: Number(this.form.baseRate), capacity: Number(this.form.capacity) })); }
+  createRoomType(): void {
+    const money = (v: any) => v === '' || v == null ? null : Number(v);
+    this.run(this.api.post('/room-types', { ...this.form, baseRate: Number(this.form.baseRate), capacity: Number(this.form.capacity),
+      weekdayRate: money(this.form.weekdayRate), weekendRate: money(this.form.weekendRate), hourlyRate: money(this.form.hourlyRate),
+      extraHourRate: money(this.form.extraHourRate), extraPersonRate: money(this.form.extraPersonRate) }));
+  }
   createRoom(): void { this.run(this.api.post('/rooms', { ...this.form, roomTypeId: Number(this.form.roomTypeId), floor: Number(this.form.floor) })); }
   createService(): void { this.run(this.api.post('/services', { ...this.form, price: Number(this.form.price), stockQuantity: Number(this.form.stockQuantity) })); }
   createProperty(): void { this.run(this.api.post('/properties', this.form), () => this.loadProperties(), 'Đã tạo cơ sở khách sạn'); }
@@ -294,15 +405,59 @@ export class AppComponent implements OnInit {
   loadReport(): void {
     this.api.get(`/reports/summary?propertyId=${this.propertyId}&from=${this.reportFrom}&to=${this.reportTo}`).subscribe({ next: r => this.report = r, error: e => this.onError(e) });
   }
-  roomClick(room: any): void {
-    if (room.current) this.openFolioByReservation(room.current.id);
-    else if (room.isOutOfOrder) this.notice('Phòng đang khóa bảo trì', true);
-    else if (room.housekeepingStatus !== 'INSPECTED') this.setView('housekeeping');
-    else this.openModal('booking', { roomId: room.id, nightlyRate: room.baseRate });
+  roomClick(room: any): void { this.roomMenu = this.roomMenu?.id === room.id ? null : room; }
+  actRoom(action: string): void {
+    const room = this.roomMenu;
+    if (!room) return;
+    if (action === 'folio' && room.current) this.openFolioByReservation(room.current.id);
+    else if (action === 'checkin' && room.next) this.checkIn({ id: room.next.id, roomNumber: room.number, fullName: 'khách đặt trước' });
+    else if (action === 'book') this.openModal('booking', { roomId: room.id, nightlyRate: room.baseRate, bookingMode: 'OVERNIGHT' });
+    else if (action === 'hourly') this.openModal('booking', { roomId: room.id, nightlyRate: room.hourlyRate || room.baseRate, bookingMode: 'HOURLY', checkOutDate: localIsoDate(1) });
+    else if (action === 'dirty') this.housekeeping(room, 'DIRTY');
+    else if (action === 'clean') this.housekeeping(room, 'CLEAN');
+    else if (action === 'inspected') this.housekeeping(room, 'INSPECTED');
+    else if (action === 'repair') this.maintenance(room);
+    else if (action === 'assets') this.setView('assets');
+    this.roomMenu = null;
   }
+  get tapeDays(): string[] { return Array.from({ length: 7 }, (_, i) => shiftIso(this.tapeStart, i)); }
+  tapeCell(room: any, day: string): { text: string; cls: string } {
+    const hit = this.bookings.find(b => b.roomId === room.id && b.status !== 'CANCELLED' && String(b.checkInDate).slice(0, 10) <= day && String(b.checkOutDate).slice(0, 10) > day);
+    if (hit) return { text: hit.fullName, cls: hit.bookingMode === 'HOURLY' ? 'tape-hour' : hit.status === 'CHECKED_IN' ? 'tape-in' : 'tape-book' };
+    if (room.housekeepingStatus === 'DIRTY') return { text: 'Đang dọn', cls: 'tape-dirty' };
+    if (room.isOutOfOrder) return { text: 'Sửa chữa', cls: 'tape-ooo' };
+    return { text: '', cls: '' };
+  }
+  shiftTape(days: number): void { this.tapeStart = shiftIso(this.tapeStart, days); }
+  printConfirm(b: any): void {
+    const page = window.open('', '_blank', 'noopener,width=760,height=900');
+    if (!page) { this.notice('Trình duyệt đang chặn cửa sổ in', true); return; }
+    const hotel = this.currentProperty?.name || 'Lotus PMS';
+    page.document.write(`<!doctype html><html><head><title>Xác nhận ${b.code}</title><style>body{font-family:Segoe UI,sans-serif;padding:28px;color:#243044}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin-top:16px}td{padding:8px 0;border-bottom:1px solid #e6ebf2}small{color:#667085}</style></head><body><small>RESERVATION CONFIRMATION / XÁC NHẬN ĐẶT PHÒNG</small><h1>${hotel}</h1><table><tr><td>Mã / Code</td><td><b>${b.code}</b></td></tr><tr><td>Khách / Guest</td><td>${b.fullName}</td></tr><tr><td>Phòng / Room</td><td>${b.roomNumber}</td></tr><tr><td>Nhận – trả / Stay</td><td>${b.checkInDate} → ${b.checkOutDate}</td></tr><tr><td>Giá / Rate</td><td>${Number(b.nightlyRate).toLocaleString('vi-VN')} ₫</td></tr><tr><td>Trạng thái / Status</td><td>${this.statusText(b.status)}</td></tr></table><p><small>In từ Lotus PMS. Đây là xác nhận nội bộ, chưa phải hóa đơn.</small></p></body></html>`);
+    page.document.close();
+    page.focus();
+    page.print();
+  }
+  saveTask(task: any): void {
+    this.run(this.api.patch(`/housekeeping-tasks/${task.id}`, { cleaner1: task.cleaner1, cleaner2: task.cleaner2, cleaner3: task.cleaner3, note: task.note }), undefined, 'Đã lưu phiếu dọn');
+  }
+  addDeskNote(): void {
+    const text = this.deskNoteText.trim();
+    if (!text) return;
+    this.run(this.api.post('/desk-notes', { propertyId: this.propertyId, text }), () => { this.deskNoteText = ''; }, 'Đã ghi chú ca');
+  }
+  doneNote(note: any): void { this.run(this.api.post(`/desk-notes/${note.id}/done`, {}), undefined, 'Đã xong ghi chú'); }
 }
+export interface MenuNode { id?: string; key?: string; code?: string; label: string; icon?: string; children?: MenuNode[]; }
 function localIsoDate(offset: number): string {
   const d = new Date(); d.setDate(d.getDate() + offset);
+  return isoFromDate(d);
+}
+function shiftIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + days);
+  return isoFromDate(d);
+}
+function isoFromDate(d: Date): string {
   const yyyy = d.getFullYear(); const mm = String(d.getMonth() + 1).padStart(2, '0'); const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }

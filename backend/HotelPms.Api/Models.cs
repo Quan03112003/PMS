@@ -25,6 +25,11 @@ public sealed class RoomType
     [MaxLength(100)] public string Name { get; set; } = "";
     public int Capacity { get; set; } = 2;
     [Precision(18,2)] public decimal BaseRate { get; set; }
+    [Precision(18,2)] public decimal? WeekdayRate { get; set; }
+    [Precision(18,2)] public decimal? WeekendRate { get; set; }
+    [Precision(18,2)] public decimal? HourlyRate { get; set; }
+    [Precision(18,2)] public decimal? ExtraHourRate { get; set; }
+    [Precision(18,2)] public decimal? ExtraPersonRate { get; set; }
 }
 public sealed class Room
 {
@@ -46,6 +51,13 @@ public sealed class Guest
     [MaxLength(200)] public string? Email { get; set; }
     [MaxLength(100)] public string? Nationality { get; set; }
     [MaxLength(32)] public string? IdentityLast4 { get; set; }
+    [MaxLength(10)] public string? Title { get; set; }
+    [MaxLength(10)] public string? Gender { get; set; }
+    [MaxLength(20)] public string? IdDocumentType { get; set; }
+    [MaxLength(40)] public string? Ethnicity { get; set; }
+    [MaxLength(40)] public string? Religion { get; set; }
+    [MaxLength(30)] public string? StayPurpose { get; set; }
+    [MaxLength(30)] public string? LoyaltyCard { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 public sealed class Reservation
@@ -159,6 +171,30 @@ public sealed class AuditEvent
     [MaxLength(500)] public string Details { get; set; } = "";
     public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
 }
+public sealed class HousekeepingTask
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    public int RoomId { get; set; }
+    [MaxLength(20)] public string Kind { get; set; } = "CHECKOUT";
+    [MaxLength(20)] public string Status { get; set; } = "NEW";
+    public DateTime StartedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? FinishedAtUtc { get; set; }
+    [MaxLength(80)] public string? Cleaner1 { get; set; }
+    [MaxLength(80)] public string? Cleaner2 { get; set; }
+    [MaxLength(80)] public string? Cleaner3 { get; set; }
+    [MaxLength(80)] public string? InspectorName { get; set; }
+    [MaxLength(300)] public string? Note { get; set; }
+}
+public sealed class DeskNote
+{
+    public int Id { get; set; }
+    public int PropertyId { get; set; }
+    [MaxLength(240)] public string Text { get; set; } = "";
+    [MaxLength(20)] public string Status { get; set; } = "OPEN";
+    public int CreatedByUserId { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
 public sealed class AppUser
 {
     public int Id { get; set; }
@@ -200,7 +236,13 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<NightAuditLog> NightAuditLogs => Set<NightAuditLog>();
     public DbSet<EInvoice> EInvoices => Set<EInvoice>();
     public DbSet<ActionPermission> ActionPermissions => Set<ActionPermission>();
+    public DbSet<ChannelConnection> ChannelConnections => Set<ChannelConnection>();
+    public DbSet<ChannelRoomMapping> ChannelRoomMappings => Set<ChannelRoomMapping>();
+    public DbSet<ChannelBooking> ChannelBookings => Set<ChannelBooking>();
+    public DbSet<ChannelSyncLog> ChannelSyncLogs => Set<ChannelSyncLog>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<HousekeepingTask> HousekeepingTasks => Set<HousekeepingTask>();
+    public DbSet<DeskNote> DeskNotes => Set<DeskNote>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -220,6 +262,8 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<CashShift>().ToTable("cash_shifts");
         b.Entity<Agency>().ToTable("agencies").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<AuditEvent>().ToTable("audit_events");
+        b.Entity<HousekeepingTask>().ToTable("housekeeping_tasks").HasIndex(x => new { x.PropertyId, x.Status });
+        b.Entity<DeskNote>().ToTable("desk_notes").HasIndex(x => new { x.PropertyId, x.Status });
         b.Entity<AppUser>().ToTable("app_users").HasIndex(x => x.Email).IsUnique();
         b.Entity<HotelBuilding>().ToTable("hotel_buildings").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<RatePlan>().ToTable("rate_plans").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
@@ -288,6 +332,22 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<EInvoice>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<ActionPermission>().ToTable("action_permissions").HasIndex(x => new { x.Role, x.PermissionKey, x.PropertyId }).IsUnique();
         b.Entity<ActionPermission>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        // OTA channel integration. Existing databases are upgraded by sql/07-ota-integration-postgres.sql.
+        b.Entity<ChannelConnection>().ToTable("channel_connections").HasIndex(x => new { x.Provider, x.HotelCode }).IsUnique();
+        b.Entity<ChannelConnection>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelRoomMapping>().ToTable("channel_room_mappings").HasIndex(x => new { x.ConnectionId, x.ChannelRoomCode, x.ChannelRateCode }).IsUnique();
+        b.Entity<ChannelRoomMapping>().HasOne<ChannelConnection>().WithMany().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelRoomMapping>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelRoomMapping>().HasOne<RoomType>().WithMany().HasForeignKey(x => x.RoomTypeId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelRoomMapping>().HasOne<RatePlan>().WithMany().HasForeignKey(x => x.RatePlanId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelBooking>().ToTable("channel_bookings").HasIndex(x => new { x.Provider, x.ChannelBookingId, x.PayloadHash }).IsUnique();
+        b.Entity<ChannelBooking>().HasIndex(x => new { x.PropertyId, x.Status });
+        b.Entity<ChannelBooking>().HasIndex(x => new { x.PropertyId, x.Fingerprint });
+        b.Entity<ChannelBooking>().HasOne<ChannelConnection>().WithMany().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelBooking>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelBooking>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ChannelSyncLog>().ToTable("channel_sync_logs").HasIndex(x => new { x.PropertyId, x.CreatedAtUtc });
+        b.Entity<ChannelSyncLog>().HasOne<ChannelConnection>().WithMany().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Restrict);
         if (isNpgsql) {
             b.Entity<Reservation>().Property(x => x.RatePlanSnapshot).HasColumnType("jsonb");
             b.Entity<EInvoice>().Property(x => x.RequestPayload).HasColumnType("jsonb");

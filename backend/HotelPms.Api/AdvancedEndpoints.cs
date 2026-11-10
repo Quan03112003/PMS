@@ -481,7 +481,7 @@ public static class AdvancedEndpoints
     }
 
     private static string BookingCode() => "BK-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-    private static readonly string[] Methods = ["CASH", "TRANSFER", "CARD"];
+    private static readonly string[] Methods = Ops.PayMethods;
     private static async Task<int?> GetShiftId(PmsDbContext db, ClaimsPrincipal actor, int propertyId, string method)
         => method != "CASH" ? null : await db.Shifts.Where(x => x.PropertyId == propertyId && x.UserId == Ops.UserId(actor) && x.Status == "OPEN").Select(x => (int?)x.Id).FirstOrDefaultAsync();
     private static string Csv(string? s) {

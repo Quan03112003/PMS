@@ -61,7 +61,7 @@ app.MapGet("/api/health/ready", async (PmsDbContext db, ILogger<PmsDbContext> lo
     timeout.CancelAfter(TimeSpan.FromSeconds(5));
     try {
         await db.Database.ExecuteSqlRawAsync(
-            "SELECT p.time_zone_id, r.rate_plan_snapshot, a.id, t.id, h.id, e.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e WHERE 1 = 0",
+            "SELECT p.time_zone_id, r.rate_plan_snapshot, a.id, t.id, h.id, e.id, cc.id, cm.id, cb.fingerprint, cl.id, g.title, rt.weekday_rate, ht.id, dn.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e, channel_connections cc, channel_room_mappings cm, channel_bookings cb, channel_sync_logs cl, guests g, room_types rt, housekeeping_tasks ht, desk_notes dn WHERE 1 = 0",
             timeout.Token);
         return Results.Ok(new { status = "ready", database = "ok" });
     } catch (Exception ex) {
@@ -177,7 +177,8 @@ api.MapPost("/room-types", async (RoomTypeInput req, ClaimsPrincipal user, PmsDb
     if (!Ops.CanManage(user) || !Ops.HasScope(user, req.PropertyId)) return Results.Forbid();
     if (req.BaseRate < 0 || req.Capacity < 1 || string.IsNullOrWhiteSpace(req.Name)) return Ops.Fail("Thông tin loại phòng không hợp lệ");
     if (await db.RoomTypes.AnyAsync(x => x.PropertyId == req.PropertyId && x.Code == req.Code)) return Ops.Conflict("Mã loại phòng đã tồn tại");
-    var item = new RoomType { PropertyId = req.PropertyId, Code = req.Code.Trim().ToUpperInvariant(), Name = req.Name.Trim(), Capacity = req.Capacity, BaseRate = req.BaseRate };
+    var item = new RoomType { PropertyId = req.PropertyId, Code = req.Code.Trim().ToUpperInvariant(), Name = req.Name.Trim(), Capacity = req.Capacity, BaseRate = req.BaseRate,
+        WeekdayRate = req.WeekdayRate, WeekendRate = req.WeekendRate, HourlyRate = req.HourlyRate, ExtraHourRate = req.ExtraHourRate, ExtraPersonRate = req.ExtraPersonRate };
     db.RoomTypes.Add(item); await db.SaveChangesAsync(); await Ops.Log(db, user, req.PropertyId, "ROOM_TYPE_CREATE", "RoomType", item.Id);
     return Results.Ok(item);
 });
@@ -186,7 +187,7 @@ api.MapGet("/rooms", async (int propertyId, ClaimsPrincipal user, PmsDbContext d
     var rooms = await (from rm in db.Rooms join rt in db.RoomTypes on rm.RoomTypeId equals rt.Id
         where rm.PropertyId == propertyId orderby rm.Floor, rm.Number
         select new { rm.Id, rm.PropertyId, rm.RoomTypeId, rm.BuildingId, rm.Number, rm.Floor, rm.HousekeepingStatus, rm.IsOutOfOrder, rm.Note,
-            RoomTypeName = rt.Name, rt.BaseRate, rt.Capacity,
+            RoomTypeName = rt.Name, rt.BaseRate, rt.Capacity, rt.WeekdayRate, rt.WeekendRate, rt.HourlyRate, rt.ExtraHourRate, rt.ExtraPersonRate,
             Current = (from r in db.Reservations join g in db.Guests on r.GuestId equals g.Id
                        where r.RoomId == rm.Id && r.Status == "CHECKED_IN"
                        select new { r.Id, r.Code, g.FullName, r.CheckOutDate }).FirstOrDefault(),
@@ -195,7 +196,7 @@ api.MapGet("/rooms", async (int propertyId, ClaimsPrincipal user, PmsDbContext d
         }).ToListAsync();
     return Results.Ok(rooms.Select(x => new {
         x.Id, x.PropertyId, x.RoomTypeId, x.BuildingId, x.Number, x.Floor, x.HousekeepingStatus, x.IsOutOfOrder, x.Note,
-        x.RoomTypeName, x.BaseRate, x.Capacity, x.Current, x.Next,
+        x.RoomTypeName, x.BaseRate, x.WeekdayRate, x.WeekendRate, x.HourlyRate, x.ExtraHourRate, x.ExtraPersonRate, x.Capacity, x.Current, x.Next,
         DisplayStatus = x.IsOutOfOrder ? "MAINTENANCE" : x.Current != null ? "OCCUPIED" : x.HousekeepingStatus == "DIRTY" ? "DIRTY" : x.Next != null && x.Next.CheckInDate == DateOnly.FromDateTime(DateTime.Today) ? "ARRIVAL" : "VACANT"
     }));
 });
@@ -214,6 +215,15 @@ api.MapPatch("/rooms/{roomId:int}/housekeeping", async (int roomId, Housekeeping
     if (!Ops.HasScope(user, room.PropertyId)) return Results.Forbid();
     if (!new[] {"DIRTY", "CLEAN", "INSPECTED"}.Contains(req.Status)) return Ops.Fail("Trạng thái phòng không hợp lệ");
     room.HousekeepingStatus = req.Status;
+    var openTask = await db.HousekeepingTasks.Where(t => t.RoomId == room.Id && t.Status != "FINISH").OrderByDescending(t => t.Id).FirstOrDefaultAsync();
+    if (req.Status == "DIRTY" && openTask == null) {
+        var inHouse = await db.Reservations.AnyAsync(r => r.RoomId == room.Id && r.Status == "CHECKED_IN");
+        db.HousekeepingTasks.Add(new HousekeepingTask { PropertyId = room.PropertyId, RoomId = room.Id, Kind = inHouse ? "STAY" : "CHECKOUT", Status = "NEW" });
+    } else if (req.Status == "CLEAN" && openTask != null) {
+        openTask.Status = "PENDING"; openTask.FinishedAtUtc = DateTime.UtcNow;
+    } else if (req.Status == "INSPECTED" && openTask != null) {
+        openTask.Status = "FINISH"; openTask.InspectorName = user.FindFirstValue(ClaimTypes.Name); openTask.FinishedAtUtc ??= DateTime.UtcNow;
+    }
     await db.SaveChangesAsync(); await Ops.Log(db, user, room.PropertyId, "HOUSEKEEPING_UPDATE", "Room", room.Id, req.Status);
     return Results.Ok(room);
 });
@@ -228,13 +238,64 @@ api.MapPatch("/rooms/{roomId:int}/maintenance", async (int roomId, MaintenanceIn
     await db.SaveChangesAsync(); await Ops.Log(db, user, room.PropertyId, "MAINTENANCE_UPDATE", "Room", room.Id);
     return Results.Ok(room);
 });
+api.MapGet("/housekeeping-tasks", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
+    if (!Ops.HasScope(user, propertyId)) return Results.Forbid();
+    var rows = await (from t in db.HousekeepingTasks join room in db.Rooms on t.RoomId equals room.Id
+        where t.PropertyId == propertyId orderby t.Id descending
+        select new { t.Id, t.RoomId, RoomNumber = room.Number, t.Kind, t.Status, t.StartedAtUtc, t.FinishedAtUtc, t.Cleaner1, t.Cleaner2, t.Cleaner3, t.InspectorName, t.Note }).Take(80).ToListAsync();
+    return Results.Ok(rows);
+});
+api.MapPatch("/housekeeping-tasks/{id:int}", async (int id, HousekeepingTaskInput req, ClaimsPrincipal user, PmsDbContext db) => {
+    var task = await db.HousekeepingTasks.FindAsync(id);
+    if (task == null) return Results.NotFound();
+    if (!Ops.HasScope(user, task.PropertyId)) return Results.Forbid();
+    task.Cleaner1 = Ops.TrimOrNull(req.Cleaner1); task.Cleaner2 = Ops.TrimOrNull(req.Cleaner2); task.Cleaner3 = Ops.TrimOrNull(req.Cleaner3); task.Note = Ops.TrimOrNull(req.Note);
+    await db.SaveChangesAsync();
+    return Results.Ok(task);
+});
+api.MapGet("/desk-notes", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
+    if (!Ops.HasScope(user, propertyId)) return Results.Forbid();
+    return Results.Ok(await db.DeskNotes.Where(n => n.PropertyId == propertyId && n.Status == "OPEN").OrderByDescending(n => n.Id).Take(20).ToListAsync());
+});
+api.MapPost("/desk-notes", async (DeskNoteInput req, ClaimsPrincipal user, PmsDbContext db) => {
+    if (!Ops.HasScope(user, req.PropertyId)) return Results.Forbid();
+    if (string.IsNullOrWhiteSpace(req.Text) || req.Text.Trim().Length > 240) return Ops.Fail("Nội dung ghi chú không hợp lệ");
+    var note = new DeskNote { PropertyId = req.PropertyId, Text = req.Text.Trim(), CreatedByUserId = Ops.UserId(user) };
+    db.DeskNotes.Add(note); await db.SaveChangesAsync();
+    return Results.Ok(note);
+});
+api.MapPost("/desk-notes/{id:int}/done", async (int id, ClaimsPrincipal user, PmsDbContext db) => {
+    var note = await db.DeskNotes.FindAsync(id);
+    if (note == null) return Results.NotFound();
+    if (!Ops.HasScope(user, note.PropertyId)) return Results.Forbid();
+    note.Status = "DONE"; await db.SaveChangesAsync();
+    return Results.Ok(note);
+});
+api.MapPost("/pricing/room-quote", async (RoomCardQuoteRequest req, ClaimsPrincipal user, PmsDbContext db) => {
+    if (!Ops.HasScope(user, req.PropertyId)) return Results.Forbid();
+    if (req.CheckInDate >= req.CheckOutDate || req.Adults < 1) return Ops.Fail("Khoảng ngày và số khách phải hợp lệ");
+    var room = await db.Rooms.FirstOrDefaultAsync(x => x.Id == req.RoomId && x.PropertyId == req.PropertyId);
+    if (room == null) return Results.NotFound();
+    var type = await db.RoomTypes.FirstAsync(x => x.Id == room.RoomTypeId);
+    var mode = req.BookingMode ?? "OVERNIGHT";
+    RatePlan? plan = null;
+    if (req.RatePlanId is int planId)
+    {
+        plan = await db.RatePlans.FirstOrDefaultAsync(x => x.Id == planId && x.PropertyId == req.PropertyId && x.IsActive);
+        if (plan == null) return Ops.Fail("Bảng giá không thuộc cơ sở");
+        mode = plan.Mode;
+    }
+    if (mode is not ("OVERNIGHT" or "DAY_USE" or "HOURLY")) return Ops.Fail("Loại lưu trú không hợp lệ");
+    var (lines, roomUnit) = RoomCardPricing.Build(type, plan, mode, req.CheckInDate, req.CheckOutDate, req.Adults, req.Children, req.PlannedHours, req.RoomRateOverride);
+    return Results.Ok(new { mode, roomUnit, lines, total = lines.Sum(x => x.Amount), locked = true });
+});
 api.MapGet("/availability", async (int propertyId, DateOnly startDate, DateOnly endDate, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.HasScope(user, propertyId)) return Results.Forbid();
     if (startDate >= endDate) return Ops.Fail("Ngày trả phải sau ngày nhận");
     var rooms = await (from room in db.Rooms join type in db.RoomTypes on room.RoomTypeId equals type.Id
         where room.PropertyId == propertyId && !room.IsOutOfOrder && (startDate > DateOnly.FromDateTime(DateTime.Today) || room.HousekeepingStatus == "INSPECTED") &&
         !db.Reservations.Any(r => r.RoomId == room.Id && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN") && r.CheckInDate < endDate && r.CheckOutDate > startDate)
-        orderby room.Floor, room.Number select new { room.Id, room.Number, room.Floor, room.RoomTypeId, RoomTypeName = type.Name, type.BaseRate, type.Capacity }).ToListAsync();
+        orderby room.Floor, room.Number select new { room.Id, room.Number, room.Floor, room.RoomTypeId, RoomTypeName = type.Name, type.BaseRate, type.WeekdayRate, type.WeekendRate, type.HourlyRate, type.ExtraHourRate, type.ExtraPersonRate, type.Capacity }).ToListAsync();
     return Results.Ok(rooms);
 });
 api.MapGet("/guests", async (int propertyId, string? q, ClaimsPrincipal user, PmsDbContext db) => {
@@ -263,15 +324,27 @@ api.MapPost("/reservations", async (ReservationInput req, ClaimsPrincipal user, 
     var room = await db.Rooms.FirstOrDefaultAsync(x => x.Id == req.RoomId && x.PropertyId == req.PropertyId);
     if (room == null || room.IsOutOfOrder || (req.CheckInDate <= DateOnly.FromDateTime(DateTime.Today) && room.HousekeepingStatus != "INSPECTED")) return Ops.Conflict("Phòng không sẵn sàng bán");
     if (await Ops.IsBooked(db, room.Id, req.CheckInDate, req.CheckOutDate)) return Ops.Conflict("Phòng đã có đặt phòng trùng khoảng ngày");
-    var rate = req.NightlyRate ?? await db.RoomTypes.Where(x => x.Id == room.RoomTypeId).Select(x => x.BaseRate).SingleAsync();
-    if (rate < 0) return Ops.Fail("Giá phòng không hợp lệ");
-    if (req.BookingMode != null && !new[] { "OVERNIGHT", "DAY_USE", "HOURLY" }.Contains(req.BookingMode)) return Ops.Fail("Loại lưu trú không hợp lệ");
+    var mode = req.BookingMode ?? "OVERNIGHT";
+    if (mode is not ("OVERNIGHT" or "DAY_USE" or "HOURLY")) return Ops.Fail("Loại lưu trú không hợp lệ");
+    var roomType = await db.RoomTypes.FirstAsync(x => x.Id == room.RoomTypeId);
+    RatePlan? plan = null;
+    if (req.RatePlanId is int planId)
+    {
+        plan = await db.RatePlans.FirstOrDefaultAsync(x => x.Id == planId && x.PropertyId == req.PropertyId && x.IsActive);
+        if (plan == null) return Ops.Fail("Bảng giá không thuộc cơ sở");
+        mode = plan.Mode;
+    }
+    var (lines, roomUnit) = RoomCardPricing.Build(roomType, plan, mode, req.CheckInDate, req.CheckOutDate, req.Adults, req.Children, req.PlannedHours, req.NightlyRate);
+    if (lines.Any(x => x.UnitPrice < 0)) return Ops.Fail("Giá phòng không hợp lệ");
     if (req.AgencyId.HasValue && !await db.Agencies.AnyAsync(x => x.Id == req.AgencyId && x.PropertyId == req.PropertyId)) return Ops.Fail("Đại lý không thuộc cơ sở");
-    var guest = new Guest { FullName = req.GuestName.Trim(), Phone = req.Phone?.Trim() ?? "", Email = req.Email?.Trim() };
+    var guest = new Guest { FullName = req.GuestName.Trim(), Phone = req.Phone?.Trim() ?? "", Email = req.Email?.Trim(),
+        Title = Ops.TrimOrNull(req.Title), Gender = Ops.TrimOrNull(req.Gender), IdDocumentType = Ops.TrimOrNull(req.IdDocumentType),
+        Ethnicity = Ops.TrimOrNull(req.Ethnicity), Religion = Ops.TrimOrNull(req.Religion), StayPurpose = Ops.TrimOrNull(req.StayPurpose), LoyaltyCard = Ops.TrimOrNull(req.LoyaltyCard) };
     db.Guests.Add(guest); await db.SaveChangesAsync();
     var item = new Reservation { Code = "BK-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant(), PropertyId = req.PropertyId, RoomId = req.RoomId,
         GuestId = guest.Id, CheckInDate = req.CheckInDate, CheckOutDate = req.CheckOutDate, Adults = req.Adults, Children = req.Children,
-        NightlyRate = rate, BookingSource = req.BookingSource ?? "DIRECT", BookingMode = req.BookingMode ?? "OVERNIGHT", AgencyId = req.AgencyId,
+        NightlyRate = roomUnit, BookingSource = req.BookingSource ?? "DIRECT", BookingMode = mode, AgencyId = req.AgencyId,
+        RatePlanId = plan?.Id, RatePlanSnapshot = RoomCardPricing.Serialize(plan == null ? "ROOM_CARD" : "RATE_PLAN", mode, lines, roomType, plan, req.NightlyRate),
         GroupCode = req.GroupCode, Note = req.Note, Status = "CONFIRMED" };
     db.Reservations.Add(item); await db.SaveChangesAsync();
     await Ops.Log(db, user, req.PropertyId, "RESERVATION_CREATE", "Reservation", item.Id, item.Code);
@@ -285,6 +358,7 @@ api.MapPost("/reservations/{id:int}/cancel", async (int id, ClaimsPrincipal user
     await Ops.LockReservation(db, id);
     await db.Entry(r).ReloadAsync();
     if (r.Status != "CONFIRMED") return Ops.Conflict("Chỉ được hủy phòng chưa check-in");
+    if (await Ops.OtaPendingConfirmation(db, id)) return Ops.Conflict("Booking OTA chưa hoàn tất xác nhận 2 lớp; xác nhận tại màn hình Kết nối OTA trước khi hủy");
     var paid = await db.Payments.Where(x => x.ReservationId == id).SumAsync(x => (decimal?)x.Amount) ?? 0;
     if (paid != 0) return Ops.Conflict("Booking còn tiền cọc, quản lý phải hoàn cọc trước khi hủy");
     r.Status = "CANCELLED"; await db.SaveChangesAsync();
@@ -294,7 +368,7 @@ api.MapPost("/reservations/{id:int}/cancel", async (int id, ClaimsPrincipal user
 // Refund is an explicit negative ledger entry; cancellation is never allowed to lose a deposit.
 api.MapPost("/reservations/{id:int}/refund-deposit", async (int id, PaymentInput req, ClaimsPrincipal user, PmsDbContext db) => {
     if (!Ops.CanManage(user)) return Results.Forbid();
-    if (req.Amount <= 0 || req.Amount > 10000000000m || !new[] { "CASH", "TRANSFER", "CARD" }.Contains(req.Method) ||
+    if (req.Amount <= 0 || req.Amount > 10000000000m || !Ops.PayMethods.Contains(req.Method) ||
         !Ops.ValidIdempotency(req.IdempotencyKey) || string.IsNullOrWhiteSpace(req.Reference))
         return Ops.Fail("Cần số tiền hoàn, phương thức, mã giao dịch và idempotencyKey UUID hợp lệ");
     await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -335,10 +409,18 @@ api.MapPost("/reservations/{id:int}/check-in", async (int id, ClaimsPrincipal us
     r.Status = "CHECKED_IN";
     var stay = new Stay { ReservationId = r.Id, RoomId = r.RoomId };
     db.Stays.Add(stay);
-    // DAY_USE and HOURLY are one prepaid tariff block; advanced overtime calculations are not automated in this demo.
-    var nights = r.BookingMode == "OVERNIGHT" ? r.CheckOutDate.DayNumber - r.CheckInDate.DayNumber : 1;
-    db.Charges.Add(new FolioCharge { ReservationId = r.Id, Category = "ROOM", Description = r.BookingMode == "OVERNIGHT" ? $"Tiền phòng {nights} đêm" : $"Gói {r.BookingMode}", Quantity = nights,
-        UnitPrice = r.NightlyRate, Amount = r.NightlyRate * nights });
+    var locked = RoomCardPricing.Read(r.RatePlanSnapshot);
+    if (locked.Count > 0)
+    {
+        foreach (var line in locked)
+            db.Charges.Add(new FolioCharge { ReservationId = r.Id, Category = line.Category, Description = line.Description, Quantity = line.Quantity, UnitPrice = line.UnitPrice, Amount = line.Amount });
+    }
+    else
+    {
+        var nights = r.BookingMode == "OVERNIGHT" ? r.CheckOutDate.DayNumber - r.CheckInDate.DayNumber : 1;
+        db.Charges.Add(new FolioCharge { ReservationId = r.Id, Category = "ROOM", Description = r.BookingMode == "OVERNIGHT" ? $"Tiền phòng {nights} đêm" : $"Gói {r.BookingMode}", Quantity = nights,
+            UnitPrice = r.NightlyRate, Amount = r.NightlyRate * nights });
+    }
     await db.SaveChangesAsync();
     await Ops.Log(db, user, r.PropertyId, "CHECK_IN", "Stay", stay.Id);
     await tx.CommitAsync();
@@ -484,11 +566,16 @@ api.MapPost("/stays/{stayId:int}/extend", async (int stayId, ExtendInput req, Cl
     if (await db.Reservations.AnyAsync(x => x.Id != r.Id && x.RoomId == stay.RoomId && x.Status == "CONFIRMED" && x.CheckInDate < req.NewCheckOutDate && x.CheckOutDate > r.CheckOutDate))
         return Ops.Conflict("Có đặt phòng khác trong thời gian muốn gia hạn");
     var nights = req.NewCheckOutDate.DayNumber - r.CheckOutDate.DayNumber;
-    var charge = new FolioCharge { ReservationId = r.Id, Category = "ROOM", Description = $"Gia hạn {nights} đêm", Quantity = nights,
-        UnitPrice = r.NightlyRate, Amount = nights * r.NightlyRate };
-    db.Charges.Add(charge); r.CheckOutDate = req.NewCheckOutDate;
+    var extension = r.BookingMode == "OVERNIGHT"
+        ? RoomCardPricing.ExtendNights(r.RatePlanSnapshot, r.CheckOutDate, req.NewCheckOutDate, r.Adults, r.Children)
+        : [];
+    if (extension.Count == 0)
+        extension.Add(new RoomCardPricing.Line("ROOM", $"Gia hạn {nights} đêm", nights, r.NightlyRate, nights * r.NightlyRate));
+    foreach (var line in extension)
+        db.Charges.Add(new FolioCharge { ReservationId = r.Id, Category = line.Category, Description = line.Description, Quantity = line.Quantity, UnitPrice = line.UnitPrice, Amount = line.Amount });
+    r.CheckOutDate = req.NewCheckOutDate;
     await db.SaveChangesAsync(); await Ops.Log(db, user, r.PropertyId, "EXTEND_STAY", "Stay", stay.Id);
-    await tx.CommitAsync(); return Results.Ok(new { stay.Id, r.CheckOutDate, charge.Amount });
+    await tx.CommitAsync(); return Results.Ok(new { stay.Id, r.CheckOutDate, amount = extension.Sum(x => x.Amount) });
 });
 api.MapGet("/agencies", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) =>
     Ops.HasScope(user, propertyId) ? (IResult)Results.Ok(await db.Agencies.Where(x => x.PropertyId == propertyId).OrderBy(x => x.Name).ToListAsync()) : Results.Forbid());
@@ -523,19 +610,25 @@ app.MapPmsV2();
 app.MapPricingV4();
 app.MapNightAuditV4();
 app.MapV5Foundation();
+app.MapOtaIntegration();
 app.Run();
 
 public record LoginRequest(string Email, string Password);
 public record PropertyInput(string Code, string Name, string? City, string? Address, string? Phone);
 public record UserInput(int? PropertyId, string FullName, string Email, string Password, string Role);
 public record UserUpdateInput(int? PropertyId, string FullName, string Email, string? Password, string Role, bool IsActive);
-public record RoomTypeInput(int PropertyId, string Code, string Name, int Capacity, decimal BaseRate);
+public record RoomTypeInput(int PropertyId, string Code, string Name, int Capacity, decimal BaseRate,
+    decimal? WeekdayRate = null, decimal? WeekendRate = null, decimal? HourlyRate = null, decimal? ExtraHourRate = null, decimal? ExtraPersonRate = null);
 public record RoomInput(int PropertyId, int RoomTypeId, string Number, int Floor);
 public record HousekeepingInput(string Status);
+public record HousekeepingTaskInput(string? Cleaner1, string? Cleaner2, string? Cleaner3, string? Note);
+public record DeskNoteInput(int PropertyId, string Text);
 public record MaintenanceInput(bool IsOutOfOrder, string? Note);
+public record RoomCardQuoteRequest(int PropertyId, int RoomId, DateOnly CheckInDate, DateOnly CheckOutDate, string? BookingMode, int Adults, int Children, int? PlannedHours, decimal? RoomRateOverride, int? RatePlanId);
 public record ReservationInput(int PropertyId, int RoomId, string GuestName, string Phone, string? Email,
     DateOnly CheckInDate, DateOnly CheckOutDate, int Adults, int Children, decimal? NightlyRate,
-    string? BookingSource, string? GroupCode, string? Note, string? BookingMode = null, int? AgencyId = null);
+    string? BookingSource, string? GroupCode, string? Note, string? BookingMode = null, int? AgencyId = null, int? RatePlanId = null, int? PlannedHours = null,
+    string? Title = null, string? Gender = null, string? IdDocumentType = null, string? Ethnicity = null, string? Religion = null, string? StayPurpose = null, string? LoyaltyCard = null);
 public record ServiceInput(int PropertyId, string Code, string Name, string Unit, decimal Price, bool TrackInventory, int StockQuantity);
 public record RestockInput(int Quantity);
 public record PostServiceInput(int ServiceId, int Quantity);
@@ -549,7 +642,9 @@ public record AgencyInput(int PropertyId, string Code, string Name, decimal Comm
 public static class Ops
 {
     private static readonly string[] DepartmentRoles = ["FRONT_DESK_AGENT", "SALES_AGENT", "HOUSEKEEPING_AGENT", "MAINTENANCE_AGENT", "ACCOUNTING_AGENT"];
+    public static readonly string[] PayMethods = ["CASH", "TRANSFER", "CARD", "MOMO", "VNPAY"];
     public static int UserId(ClaimsPrincipal user) => int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
+    public static string? TrimOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     public static int? UserProperty(ClaimsPrincipal user) => int.TryParse(user.FindFirstValue("propertyId"), out var id) ? id : null;
     public static bool HasScope(ClaimsPrincipal user, int propertyId) => propertyId > 0 && (UserProperty(user) == null || UserProperty(user) == propertyId);
     public static bool CanManage(ClaimsPrincipal user) => user.IsInRole("CHAIN_ADMIN") || user.IsInRole("PROPERTY_MANAGER");
@@ -578,6 +673,8 @@ public static class Ops
         };
         return allowed ? await next(context) : Results.Forbid();
     }
+    public static Task<bool> OtaPendingConfirmation(PmsDbContext db, int reservationId) =>
+        db.ChannelBookings.AnyAsync(x => x.ReservationId == reservationId && x.Status == "PENDING_CONFIRMATION");
     public static IResult Fail(string msg) => Results.BadRequest(new { message = msg });
     public static IResult Conflict(string msg) => Results.Conflict(new { message = msg });
     public static Task<bool> IsBooked(PmsDbContext db, int roomId, DateOnly start, DateOnly end) =>
@@ -609,7 +706,7 @@ public static class Ops
     }
     public static async Task<IResult> RecordPayment(PmsDbContext db, ClaimsPrincipal user, int propertyId, int reservationId, PaymentInput req, string kind) {
         if (req.Amount <= 0 || req.Amount > 10000000000m) return Fail("Số tiền phải lớn hơn 0 và trong giới hạn");
-        if (!new[] { "CASH", "TRANSFER", "CARD" }.Contains(req.Method)) return Fail("Phương thức thanh toán không hợp lệ");
+        if (!Ops.PayMethods.Contains(req.Method)) return Fail("Phương thức thanh toán không hợp lệ");
         if (!ValidIdempotency(req.IdempotencyKey)) return Fail("idempotencyKey bắt buộc là UUID để chống ghi trùng giao dịch");
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         await LockReservation(db, reservationId);
@@ -628,7 +725,8 @@ public static class Ops
         var paid = await db.Payments.Where(x => x.ReservationId == reservationId).SumAsync(x => (decimal?)x.Amount) ?? 0;
         if (kind == "PAYMENT" && paid + req.Amount > total) return Conflict("Thanh toán vượt số dư folio");
         if (kind == "DEPOSIT") {
-            var expected = reservation.NightlyRate * (reservation.BookingMode == "OVERNIGHT" ?
+            var locked = RoomCardPricing.LockedTotal(reservation.RatePlanSnapshot);
+            var expected = locked > 0 ? locked : reservation.NightlyRate * (reservation.BookingMode == "OVERNIGHT" ?
                 reservation.CheckOutDate.DayNumber - reservation.CheckInDate.DayNumber : 1);
             if (paid + req.Amount > expected) return Conflict("Cọc vượt giá phòng đã xác nhận");
         }
