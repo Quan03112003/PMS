@@ -300,7 +300,7 @@ Vì bạn đang chạy trên web (Vercel frontend + Render backend + Neon databa
 Từ Neon Console (https://console.neon.tech/), lấy connection string của database `neondb`:
 
 ```
-postgresql://neondb_owner:npg_Mx9y7ShHUXGu@ep-nameless-frost-aodat4et-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+postgresql://<user>:<password>@<endpoint>-pooler.<region>.aws.neon.tech/neondb?sslmode=require
 ```
 
 ### Bước 2: Chạy script seed trên Neon
@@ -308,7 +308,7 @@ postgresql://neondb_owner:npg_Mx9y7ShHUXGu@ep-nameless-frost-aodat4et-pooler.c-2
 **Cách A: Dùng psql (command line)**
 
 ```powershell
-psql "postgresql://neondb_owner:npg_Mx9y7ShHUXGu@ep-nameless-frost-aodat4et-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require" -f sql/99-seed-test-data-postgres.sql
+psql "$NEON_DATABASE_URL" -f sql/99-seed-test-data-postgres.sql
 ```
 
 **Cách B: Dùng DBeaver**

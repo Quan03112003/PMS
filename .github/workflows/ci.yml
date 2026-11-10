@@ -1,0 +1,127 @@
+name: ci
+
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build backend/HotelPms.Api -c Release
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run test:types
+      - run: npm run build
+
+  static-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python qa/static_qa_checks.py
+      - run: python qa/test_v3_static_contracts.py
+      - run: python qa/test_v4_static_contracts.py
+      - run: python qa/test_v5_static_contracts.py
+
+  # Runtime evidence on a real PostgreSQL: model creation, demo seed, V5 upgrade script idempotency,
+  # readiness, and the adjustment-voucher maker-checker flow.
+  postgres-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pms
+          POSTGRES_PASSWORD: pms
+          POSTGRES_DB: pms
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U pms"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      ConnectionStrings__PmsDb: Host=localhost;Port=5432;Database=pms;Username=pms;Password=pms
+      Database__Provider: PostgreSQL
+      Jwt__Secret: ci-only-jwt-secret-not-used-anywhere-else-0123456789
+      Jwt__Issuer: HotelPms.Api
+      Jwt__Audience: HotelPms.Angular
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://127.0.0.1:5080
+      PGPASSWORD: pms
+      API: http://127.0.0.1:5080/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build backend/HotelPms.Api -c Release
+      - name: Start API (EnsureCreated + demo seed on empty database)
+        run: |
+          nohup dotnet run --project backend/HotelPms.Api -c Release --no-build --no-launch-profile > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -fs "$API/health/live" && exit 0; sleep 2; done
+          exit 1
+      - name: Apply V5 upgrade script twice
+        run: |
+          psql -h localhost -U pms -d pms -v ON_ERROR_STOP=1 -f sql/06-v5-foundation-postgres.sql
+          psql -h localhost -U pms -d pms -v ON_ERROR_STOP=1 -f sql/06-v5-foundation-postgres.sql
+      - name: Readiness and V5 smoke
+        run: |
+          set -euo pipefail
+          curl -fs "$API/health/ready"
+          login() { curl -fs -X POST "$API/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"Demo@12345\"}" | jq -r .token; }
+          ADMIN=$(login admin@pms.local); MANAGER=$(login manager@pms.local)
+          get() { curl -fs -H "Authorization: Bearer $1" "$API/$2"; }
+          code() { curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d '{}' "$API/$2"; }
+          get "$ADMIN" "tax-rules?propertyId=1" > /dev/null
+          get "$ADMIN" "holiday-rates?propertyId=1" > /dev/null
+          RES=$(get "$ADMIN" "stays?propertyId=1" | jq -r '.[0].reservationId // empty')
+          EXPECT_POST=200
+          if [ -z "$RES" ]; then RES=$(get "$ADMIN" "reservations?propertyId=1" | jq -r '.[0].id'); EXPECT_POST=409; fi
+          KEY=$(cat /proc/sys/kernel/random/uuid)
+          BODY="{\"propertyId\":1,\"reservationId\":$RES,\"kind\":\"MANUAL_ADJUSTMENT\",\"amountDelta\":50000,\"reason\":\"CI smoke test\",\"idempotencyKey\":\"$KEY\"}"
+          V1=$(curl -fs -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' -d "$BODY" "$API/adjustment-vouchers" | jq -r .id)
+          V2=$(curl -fs -X POST -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' -d "$BODY" "$API/adjustment-vouchers" | jq -r .id)
+          [ "$V1" = "$V2" ] || { echo "idempotent replay created a second voucher"; exit 1; }
+          [ "$(code "$ADMIN" "adjustment-vouchers/$V1/approve")" = 409 ] || { echo "creator approved own voucher"; exit 1; }
+          [ "$(code "$MANAGER" "adjustment-vouchers/$V1/approve")" = 200 ] || { echo "manager approval failed"; exit 1; }
+          [ "$(code "$ADMIN" "adjustment-vouchers/$V1/post")" = "$EXPECT_POST" ] || { echo "post did not return $EXPECT_POST"; exit 1; }
+          echo "V5 smoke passed (post expected $EXPECT_POST)"
+      - name: API log
+        if: always()
+        run: cat api.log
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

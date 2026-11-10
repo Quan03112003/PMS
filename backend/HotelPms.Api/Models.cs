@@ -14,6 +14,7 @@ public sealed class Property
     [MaxLength(15)] public string Phone { get; set; } = "";
     public TimeOnly CheckInTime { get; set; } = new(14, 0);
     public TimeOnly CheckOutTime { get; set; } = new(12, 0);
+    [MaxLength(64)] public string TimeZoneId { get; set; } = "Asia/Ho_Chi_Minh"; // IANA id
     public bool IsActive { get; set; } = true;
 }
 public sealed class RoomType
@@ -55,6 +56,8 @@ public sealed class Reservation
     public int RoomId { get; set; }
     public int GuestId { get; set; }
     public int? AgencyId { get; set; }
+    public int? RatePlanId { get; set; }
+    public string? RatePlanSnapshot { get; set; } // jsonb on PostgreSQL
     public DateOnly CheckInDate { get; set; }
     public DateOnly CheckOutDate { get; set; }
     public int Adults { get; set; } = 1;
@@ -191,10 +194,18 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<CashShift> Shifts => Set<CashShift>();
     public DbSet<Agency> Agencies => Set<Agency>();
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<AdjustmentVoucher> AdjustmentVouchers => Set<AdjustmentVoucher>();
+    public DbSet<TaxRule> TaxRules => Set<TaxRule>();
+    public DbSet<HolidayRate> HolidayRates => Set<HolidayRate>();
+    public DbSet<NightAuditLog> NightAuditLogs => Set<NightAuditLog>();
+    public DbSet<EInvoice> EInvoices => Set<EInvoice>();
+    public DbSet<ActionPermission> ActionPermissions => Set<ActionPermission>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        var isNpgsql = Database.IsNpgsql();
+        string NotNullFilter(string column) => isNpgsql ? $"{column} IS NOT NULL" : $"[{column}] IS NOT NULL";
         b.Entity<Property>().ToTable("properties").HasIndex(x => x.Code).IsUnique();
         b.Entity<RoomType>().ToTable("room_types").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<Room>().ToTable("rooms").HasIndex(x => new { x.PropertyId, x.Number }).IsUnique();
@@ -205,7 +216,7 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<ReservationOccupant>().ToTable("reservation_occupants").HasIndex(x => x.ReservationId);
         b.Entity<ServiceItem>().ToTable("services").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<FolioCharge>().ToTable("folio_charges");
-        b.Entity<Payment>().ToTable("payments").HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("[idempotency_key] IS NOT NULL");
+        b.Entity<Payment>().ToTable("payments").HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter(NotNullFilter("idempotency_key"));
         b.Entity<CashShift>().ToTable("cash_shifts");
         b.Entity<Agency>().ToTable("agencies").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
         b.Entity<AuditEvent>().ToTable("audit_events");
@@ -257,6 +268,31 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<DebtReceivable>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<GuestAsset>().HasOne<Stay>().WithMany().HasForeignKey(x => x.StayId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<DailyClose>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        // V5 foundation tables. Existing databases are upgraded by sql/06-v5-foundation-postgres.sql.
+        b.Entity<Reservation>().HasOne<RatePlan>().WithMany().HasForeignKey(x => x.RatePlanId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AdjustmentVoucher>().ToTable("adjustment_vouchers").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
+        b.Entity<AdjustmentVoucher>().HasIndex(x => x.IdempotencyKey).IsUnique();
+        b.Entity<AdjustmentVoucher>().HasIndex(x => new { x.ReservationId, x.Status });
+        b.Entity<AdjustmentVoucher>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AdjustmentVoucher>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AdjustmentVoucher>().HasOne<FolioCharge>().WithMany().HasForeignKey(x => x.OriginalChargeId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AdjustmentVoucher>().HasOne<FolioCharge>().WithMany().HasForeignKey(x => x.PostedChargeId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<TaxRule>().ToTable("tax_rules").HasIndex(x => new { x.PropertyId, x.Code, x.EffectiveFrom }).IsUnique();
+        b.Entity<TaxRule>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<HolidayRate>().ToTable("holiday_rates").HasIndex(x => new { x.PropertyId, x.Code }).IsUnique();
+        b.Entity<HolidayRate>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<NightAuditLog>().ToTable("night_audit_logs").HasIndex(x => new { x.PropertyId, x.BusinessDate }).IsUnique();
+        b.Entity<NightAuditLog>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<EInvoice>().ToTable("e_invoices").HasIndex(x => new { x.PropertyId, x.Status });
+        b.Entity<EInvoice>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<EInvoice>().HasOne<Reservation>().WithMany().HasForeignKey(x => x.ReservationId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<ActionPermission>().ToTable("action_permissions").HasIndex(x => new { x.Role, x.PermissionKey, x.PropertyId }).IsUnique();
+        b.Entity<ActionPermission>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        if (isNpgsql) {
+            b.Entity<Reservation>().Property(x => x.RatePlanSnapshot).HasColumnType("jsonb");
+            b.Entity<EInvoice>().Property(x => x.RequestPayload).HasColumnType("jsonb");
+            b.Entity<EInvoice>().Property(x => x.ResponsePayload).HasColumnType("jsonb");
+        }
         // Word V1.0 naming convention: Database = snake_case, C# = PascalCase, JSON = camelCase.
         foreach (var type in b.Model.GetEntityTypes())
             foreach (var column in type.GetProperties())

@@ -54,6 +54,21 @@ if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Dat
 }
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", version = "1.0-demo" }));
+app.MapGet("/api/health/live", () => Results.Ok(new { status = "live" }));
+app.MapGet("/api/health/ready", async (PmsDbContext db, ILogger<PmsDbContext> logger, CancellationToken ct) => {
+    // Touches the V5 columns/tables so a deploy fails readiness until sql/06-v5-foundation-postgres.sql is applied.
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeout.CancelAfter(TimeSpan.FromSeconds(5));
+    try {
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT p.time_zone_id, r.rate_plan_snapshot, a.id, t.id, h.id, e.id FROM properties p, reservations r, adjustment_vouchers a, tax_rules t, holiday_rates h, e_invoices e WHERE 1 = 0",
+            timeout.Token);
+        return Results.Ok(new { status = "ready", database = "ok" });
+    } catch (Exception ex) {
+        logger.LogWarning("Readiness check failed: {ErrorType}", ex.GetType().Name);
+        return Results.Json(new { status = "unavailable", database = "error" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 app.MapPost("/api/auth/login", async (LoginRequest req, PmsDbContext db, IPasswordHasher<AppUser> hasher, IConfiguration conf) => {
     var user = await db.Users.FirstOrDefaultAsync(x => x.Email == req.Email.ToLower().Trim() && x.IsActive);
     if (user == null || hasher.VerifyHashedPassword(user, user.PasswordHash, req.Password) == PasswordVerificationResult.Failed)
@@ -507,6 +522,7 @@ api.MapGet("/audit", async (int propertyId, ClaimsPrincipal user, PmsDbContext d
 app.MapPmsV2();
 app.MapPricingV4();
 app.MapNightAuditV4();
+app.MapV5Foundation();
 app.Run();
 
 public record LoginRequest(string Email, string Password);

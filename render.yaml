@@ -5,7 +5,7 @@ services:
     plan: free
     dockerfilePath: ./backend/HotelPms.Api/Dockerfile
     dockerContext: .
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/ready
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
@@ -14,7 +14,7 @@ services:
       - key: Database__Provider
         value: PostgreSQL
       - key: Database__InitializeForDemo
-        value: "true"
+        value: "false"
       - key: ConnectionStrings__PmsDb
         sync: false
       - key: Jwt__Secret

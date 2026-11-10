@@ -60,7 +60,11 @@ export class AdvancedComponent implements OnChanges {
     suppliers: 'Nhà cung cấp', retail: 'Bán hàng ngoài phòng', vouchers: 'Phiếu thu – phiếu chi',
     debts: 'Công nợ khách hàng', assets: 'Tài sản khách gửi', dayclose: 'Snapshot chốt ngày',
     chain: 'Tổng hợp toàn chuỗi', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
-    pricingQuote: 'Báo giá & phụ thu'
+    pricingQuote: 'Báo giá & phụ thu',
+    adjustmentVouchers: 'Phiếu điều chỉnh',
+    nightAudit: 'Chốt đêm',
+    taxRules: 'Quy tắc thuế',
+    eInvoices: 'Hóa đơn điện tử'
   };
   constructor(private api: ApiService) { this.resetForm(); }
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
@@ -152,7 +156,7 @@ export class AdvancedComponent implements OnChanges {
   submit(path: string, body: any, after?: () => void): void {
     if (this.submitting) return;
     this.submitting = true; this.error = ''; this.success = '';
-    this.api.post(path, body).subscribe({ next: () => { this.submitting = false; this.success = 'Đã ghi nhận và cập nhật SQL Server';
+    this.api.post(path, body).subscribe({ next: () => { this.submitting = false; this.success = 'Đã ghi nhận';
       this.resetForm(); after?.(); this.load(); }, error: e => { this.submitting = false; this.error = e?.error?.message || `Lỗi API (${e?.status || 'mất kết nối'})`; } });
   }
   createWaitlist(): void { this.submit('/waitlist', { ...this.form, roomTypeId: this.form.roomTypeId ? +this.form.roomTypeId : null }); }

@@ -15,7 +15,7 @@ advangular=(root/'frontend/src/app/advanced.component.ts').read_text(encoding='u
 testapi=(root/'qa/e2e_api_sqlserver.py').read_text(encoding='utf-8')
 checks={
   'SRC-01 Payment has immutable UUID idempotency key': 'IdempotencyKey { get; set; }' in models and 'ValidIdempotency(req.IdempotencyKey)' in backend,
-  'SRC-02 Unique filtered SQL index for payment request': 'CREATE UNIQUE INDEX IX_payments_idempotency_key' in migration and 'HasFilter("[idempotency_key] IS NOT NULL")' in models,
+  'SRC-02 Unique filtered SQL index for payment request': 'CREATE UNIQUE INDEX IX_payments_idempotency_key' in migration and 'HasFilter(NotNullFilter("idempotency_key"))' in models and '$"{column} IS NOT NULL"' in models and '$"[{column}] IS NOT NULL"' in models,
   'SRC-03 Payment lock before sum and insert': backend.index('await LockReservation(db, reservationId)') < backend.index('var total = await db.Charges.Where(x => x.ReservationId == reservationId)'),
   'SRC-04 Refund writes negative signed ledger entry': 'Amount = -req.Amount' in backend and 'Kind = "REFUND"' in backend,
   'SRC-05 Cancel checks outstanding deposits': 'if (paid != 0) return Ops.Conflict("Booking còn tiền cọc' in backend,

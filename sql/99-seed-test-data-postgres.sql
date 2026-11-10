@@ -4,7 +4,7 @@
  * Mục đích: cung cấp nhiều dữ liệu để kiểm thử toàn diện các chức năng PMS.
  *
  * Cách chạy:
- *   psql "postgresql://neondb_owner:npg_Mx9y7ShHUXGu@ep-nameless-frost-aodat4et-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require" -f sql/99-seed-test-data-postgres.sql
+ *   psql "$NEON_DATABASE_URL" -f sql/99-seed-test-data-postgres.sql
  *
  * Hoặc dùng DBeaver/pgAdmin: kết nối Neon, mở file này, chạy toàn bộ.
  **********************************************************************************************/
