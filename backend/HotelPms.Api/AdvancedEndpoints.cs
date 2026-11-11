@@ -77,6 +77,7 @@ public static class AdvancedEndpoints
             if (!Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
             if (req.CheckInDate >= req.CheckOutDate || string.IsNullOrWhiteSpace(req.GuestName) || req.RoomIds == null || req.RoomIds.Length < 2 || req.RoomIds.Length > 30 || req.RoomIds.Distinct().Count() != req.RoomIds.Length)
                 return Ops.Fail("Đoàn cần 2-30 phòng khác nhau, ngày trả sau ngày nhận");
+            if (req.CutoffDate is DateOnly cutoff && cutoff >= req.CheckInDate) return Ops.Fail("Ngày khóa sổ phải trước ngày nhận phòng.");
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             foreach (var roomId in req.RoomIds.OrderBy(x => x))
                 if (!await Ops.LockRoom(db, roomId)) return Ops.Conflict("Phòng không tồn tại");
@@ -92,6 +93,8 @@ public static class AdvancedEndpoints
             foreach (var room in rooms) db.Reservations.Add(new Reservation { Code = BookingCode(), GroupCode = groupCode,
                 PropertyId = req.PropertyId, GuestId = guest.Id, RoomId = room.Id, CheckInDate = req.CheckInDate, CheckOutDate = req.CheckOutDate,
                 NightlyRate = types[room.RoomTypeId], Adults = 1, BookingSource = req.BookingSource ?? "DIRECT", Note = req.Note });
+            await db.SaveChangesAsync();
+            if (req.CutoffDate is DateOnly cut) db.GroupCutoffs.Add(new GroupCutoff { PropertyId = req.PropertyId, Code = groupCode, CutoffDate = cut });
             await db.SaveChangesAsync(); await Ops.Log(db, actor, req.PropertyId, "GROUP_BOOK", "Reservation", 0, groupCode);
             await tx.CommitAsync(); return Results.Ok(new { groupCode, roomCount = rooms.Count });
         });
@@ -140,8 +143,11 @@ public static class AdvancedEndpoints
         api.MapGet("/groups", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) => {
             if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
             var list = await db.Reservations.Where(x => x.PropertyId == propertyId && x.GroupCode != null).ToListAsync();
+            var cuts = await db.GroupCutoffs.Where(x => x.PropertyId == propertyId).ToDictionaryAsync(x => x.Code, x => x.CutoffDate);
             return Results.Ok(list.GroupBy(x => x.GroupCode).Select(g => new { groupCode = g.Key, rooms = g.Count(),
-                confirmed = g.Count(x => x.Status == "CONFIRMED"), inHouse = g.Count(x => x.Status == "CHECKED_IN"), checkedOut = g.Count(x => x.Status == "CHECKED_OUT") }).ToList());
+                confirmed = g.Count(x => x.Status == "CONFIRMED"), inHouse = g.Count(x => x.Status == "CHECKED_IN"), checkedOut = g.Count(x => x.Status == "CHECKED_OUT"),
+                cancelled = g.Count(x => x.Status == "CANCELLED"), noShow = g.Count(x => x.Status == "NO_SHOW"),
+                cutoffDate = cuts.TryGetValue(g.Key!, out var day) ? day : (DateOnly?)null }).ToList());
         });
         api.MapGet("/groups/{code}/candidates", async (string code, int propertyId, ClaimsPrincipal actor, PmsDbContext db) => {
             if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
@@ -269,11 +275,52 @@ public static class AdvancedEndpoints
         });
 
         // RECEIVABLES: debt checkout, debt collection, guarded same-day restore.
-        api.MapGet("/debts", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) => {
+        api.MapGet("/debts", async (int propertyId, DateOnly? from, DateOnly? to, string? status, string? source, ClaimsPrincipal actor, PmsDbContext db) => {
             if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
-            return Results.Ok(await (from d in db.Debts join r in db.Reservations on d.ReservationId equals r.Id
-                join g in db.Guests on r.GuestId equals g.Id where d.PropertyId == propertyId orderby d.Id descending
-                select new { d.Id, d.ReservationId, r.Code, g.FullName, g.Phone, d.OriginalAmount, d.OutstandingAmount, d.Status, d.Note, d.CreatedAtUtc }).Take(200).ToListAsync());
+            var rangeError = Ops.DateWindow(from, to, out var start, out var end);
+            if (rangeError != null) return Ops.Fail(rangeError);
+            var ranged = from.HasValue;
+            var wantedStatus = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToUpperInvariant();
+            var wantedSource = string.IsNullOrWhiteSpace(source) ? null : source.Trim().ToUpperInvariant();
+            var stayRows = await (from d in db.Debts
+                where d.PropertyId == propertyId && d.ReservationId != null
+                join r in db.Reservations on d.ReservationId equals r.Id
+                join g in db.Guests on r.GuestId equals g.Id
+                select new { d.Id, d.ReservationId, d.VirtualFolioId, Code = r.Code, g.FullName, g.Phone, d.OriginalAmount, d.OutstandingAmount, d.Status, d.Origin, d.Note, d.CreatedAtUtc, Source = r.BookingSource }).ToListAsync();
+            var outside = await (from d in db.Debts
+                where d.PropertyId == propertyId && d.VirtualFolioId != null
+                join f in db.VirtualFolios on d.VirtualFolioId equals f.Id
+                select new { d.Id, d.ReservationId, d.VirtualFolioId, Code = f.Code, FullName = f.GuestName, Phone = f.Phone, d.OriginalAmount, d.OutstandingAmount, d.Status, d.Origin, d.Note, d.CreatedAtUtc, Source = "NGOAI" }).ToListAsync();
+            var rows = stayRows.Concat(outside)
+                .Where(x => !ranged || x.Status == "OPEN" || (x.CreatedAtUtc >= start && x.CreatedAtUtc < end))
+                .Where(x => wantedStatus == null || x.Status == wantedStatus)
+                .Where(x => wantedSource == null || x.Source == wantedSource)
+                .OrderByDescending(x => x.Id).Take(ranged ? 500 : 200);
+            return Results.Ok(rows);
+        });
+        api.MapGet("/debts/export", async (int propertyId, DateOnly? from, DateOnly? to, string? status, string? source, ClaimsPrincipal actor, PmsDbContext db) => {
+            if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
+            var rangeError = Ops.DateWindow(from, to, out var start, out var end);
+            if (rangeError != null) return Ops.Fail(rangeError);
+            var ranged = from.HasValue;
+            var wantedStatus = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToUpperInvariant();
+            var wantedSource = string.IsNullOrWhiteSpace(source) ? null : source.Trim().ToUpperInvariant();
+            var stayRows = await (from d in db.Debts
+                where d.PropertyId == propertyId && d.ReservationId != null
+                join r in db.Reservations on d.ReservationId equals r.Id
+                join g in db.Guests on r.GuestId equals g.Id
+                select new { Code = r.Code, Name = g.FullName, Phone = g.Phone ?? "", d.OriginalAmount, d.OutstandingAmount, d.Status, d.Origin, Source = r.BookingSource, d.CreatedAtUtc }).ToListAsync();
+            var outside = await (from d in db.Debts
+                where d.PropertyId == propertyId && d.VirtualFolioId != null
+                join f in db.VirtualFolios on d.VirtualFolioId equals f.Id
+                select new { Code = f.Code, Name = f.GuestName, Phone = f.Phone ?? "", d.OriginalAmount, d.OutstandingAmount, d.Status, d.Origin, Source = "NGOAI", d.CreatedAtUtc }).ToListAsync();
+            var rows = stayRows.Concat(outside).Where(x => !ranged || x.Status == "OPEN" || (x.CreatedAtUtc >= start && x.CreatedAtUtc < end))
+                .Where(x => wantedStatus == null || x.Status == wantedStatus).Where(x => wantedSource == null || x.Source == wantedSource);
+            var csv = new System.Text.StringBuilder();
+            csv.AppendLine("Ma,Khach,Dien thoai,Nguon,Loai no,No goc,Con thieu,Trang thai,Ngay");
+            foreach (var row in rows)
+                csv.AppendLine($"{row.Code},{row.Name},{row.Phone},{row.Source},{row.Origin},{row.OriginalAmount},{row.OutstandingAmount},{row.Status},{row.CreatedAtUtc:yyyy-MM-dd}");
+            return Results.Text("\uFEFF" + csv, "text/csv; charset=utf-8");
         });
         api.MapPost("/stays/{stayId:int}/checkout-debt", async (int stayId, CheckoutDebtInput req, ClaimsPrincipal actor, PmsDbContext db) => {
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -298,7 +345,20 @@ public static class AdvancedEndpoints
             await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
             var d = await db.Debts.FindAsync(id); if (d == null) return Results.NotFound(); if (!Ops.HasScope(actor, d.PropertyId)) return Results.Forbid();
             if (!Ops.ValidIdempotency(req.IdempotencyKey)) return Ops.Fail("Cần idempotencyKey UUID khi thu công nợ");
-            await Ops.LockReservation(db, d.ReservationId);
+            if (d.Origin == "CITY_LEDGER" || d.ReservationId == null)
+            {
+                if (await db.AuditEvents.AnyAsync(x => x.Action == "DEBT_COLLECT" && x.EntityId == d.Id && x.Details == req.IdempotencyKey))
+                { await tx.CommitAsync(); return Results.Ok(d); }
+                if (d.Status != "OPEN" || req.Amount <= 0 || req.Amount > d.OutstandingAmount || !Methods.Contains(req.Method) || req.Method == "CITY_LEDGER")
+                    return Ops.Fail("Công nợ không mở hoặc số tiền/phương thức không hợp lệ");
+                var cityShift = await GetShiftId(db, actor, d.PropertyId, req.Method);
+                if (req.Method == "CASH" && cityShift == null) return Ops.Conflict("Cần mở ca thu ngân");
+                db.Vouchers.Add(new CashVoucher { PropertyId = d.PropertyId, Code = "VC-" + Guid.NewGuid().ToString("N")[..9].ToUpperInvariant(), Type = "RECEIPT", Method = req.Method, Amount = req.Amount, Category = "CITY_LEDGER", Description = "Thu nợ City Ledger", ActorUserId = Ops.UserId(actor), ShiftId = cityShift });
+                d.OutstandingAmount -= req.Amount; if (d.OutstandingAmount == 0) { d.Status = "SETTLED"; d.SettledAtUtc = DateTime.UtcNow; }
+                await db.SaveChangesAsync(); await Ops.Log(db, actor, d.PropertyId, "DEBT_COLLECT", "DebtReceivable", d.Id, req.IdempotencyKey!);
+                await tx.CommitAsync(); return Results.Ok(d);
+            }
+            await Ops.LockReservation(db, d.ReservationId.Value);
             var previous = await db.Payments.FirstOrDefaultAsync(x => x.IdempotencyKey == req.IdempotencyKey);
             if (previous != null) {
                 if (previous.Kind != "DEBT" || previous.ReservationId != d.ReservationId || previous.Amount != req.Amount || previous.Method != req.Method)
@@ -309,7 +369,7 @@ public static class AdvancedEndpoints
             if (d.Status != "OPEN" || req.Amount <= 0 || req.Amount > d.OutstandingAmount || !Methods.Contains(req.Method)) return Ops.Fail("Công nợ không mở hoặc số tiền/phương thức không hợp lệ");
             var shiftId = await GetShiftId(db, actor, d.PropertyId, req.Method);
             if (req.Method == "CASH" && shiftId == null) return Ops.Conflict("Cần mở ca thu ngân");
-            db.Payments.Add(new Payment { ReservationId = d.ReservationId, ShiftId = shiftId, Amount = req.Amount, Method = req.Method, Kind = "DEBT", Reference = req.Reference, IdempotencyKey = req.IdempotencyKey });
+            db.Payments.Add(new Payment { ReservationId = d.ReservationId.Value, ShiftId = shiftId, Amount = req.Amount, Method = req.Method, Kind = "DEBT", Reference = req.Reference, IdempotencyKey = req.IdempotencyKey });
             d.OutstandingAmount -= req.Amount; if (d.OutstandingAmount == 0) { d.Status = "SETTLED"; d.SettledAtUtc = DateTime.UtcNow; }
             await db.SaveChangesAsync(); await Ops.Log(db, actor, d.PropertyId, "DEBT_COLLECT", "DebtReceivable", d.Id, $"{req.Amount:0}");
             await tx.CommitAsync(); return Results.Ok(d);
@@ -390,8 +450,14 @@ public static class AdvancedEndpoints
             await tx.CommitAsync(); return Results.Ok(sale);
         });
         // BOOKKEEPING: generic external receipts and expense vouchers (not double-counted as folio payments).
-        api.MapGet("/vouchers", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) =>
-            Ops.HasScope(actor, propertyId) ? (IResult)Results.Ok(await db.Vouchers.Where(x => x.PropertyId == propertyId).OrderByDescending(x => x.Id).Take(200).ToListAsync()) : Results.Forbid());
+        api.MapGet("/vouchers", async (int propertyId, DateOnly? from, DateOnly? to, ClaimsPrincipal actor, PmsDbContext db) => {
+            if (!Ops.HasScope(actor, propertyId)) return Results.Forbid();
+            var rangeError = Ops.DateWindow(from, to, out var start, out var end);
+            if (rangeError != null) return Ops.Fail(rangeError);
+            var vouchers = db.Vouchers.Where(x => x.PropertyId == propertyId);
+            if (from.HasValue) vouchers = vouchers.Where(x => x.CreatedAtUtc >= start && x.CreatedAtUtc < end);
+            return Results.Ok(await vouchers.OrderByDescending(x => x.Id).Take(from.HasValue ? 500 : 200).ToListAsync());
+        });
         api.MapPost("/vouchers", async (VoucherInput req, ClaimsPrincipal actor, PmsDbContext db) => {
             if (!Ops.CanManageFinance(actor) || !Ops.HasScope(actor, req.PropertyId)) return Results.Forbid();
             if (!new[] { "RECEIPT", "EXPENSE" }.Contains(req.Type) || !Methods.Contains(req.Method) || req.Amount <= 0 || req.Amount > 10000000000) return Ops.Fail("Phiếu thu/chi không hợp lệ");
@@ -425,12 +491,42 @@ public static class AdvancedEndpoints
             var properties = await db.Properties.Where(x => x.IsActive && (!pid.HasValue || x.Id == pid)).ToListAsync();
             var ids = properties.Select(p => p.Id).ToArray(); var all = new List<object>();
             foreach (var prop in properties) {
+                var span = to.DayNumber - from.DayNumber + 1;
+                var today = V5Closeout.PropertyToday(prop.TimeZoneId);
                 var resIds = db.Reservations.Where(r => r.PropertyId == prop.Id).Select(r => r.Id);
                 var start = from.ToDateTime(TimeOnly.MinValue).ToUniversalTime(); var end = to.AddDays(1).ToDateTime(TimeOnly.MinValue).ToUniversalTime();
-                var c = await db.Charges.Where(x => resIds.Contains(x.ReservationId) && x.PostedAtUtc >= start && x.PostedAtUtc < end).ToListAsync();
-                var p = await db.Payments.Where(x => resIds.Contains(x.ReservationId) && x.PaidAtUtc >= start && x.PaidAtUtc < end).ToListAsync();
+                decimal roomRevenue; decimal serviceRevenue; decimal folioPayments; decimal expense;
+                if (span <= 31)
+                {
+                    await DeskScale.EnsureSnapshots(db, prop, from, to, today);
+                    var snaps = await db.PropertyDaySnapshots.Where(x => x.PropertyId == prop.Id && x.BusinessDate >= from && x.BusinessDate <= to && x.BusinessDate < today).ToListAsync();
+                    roomRevenue = snaps.Sum(x => x.RoomRevenue);
+                    serviceRevenue = snaps.Sum(x => x.ServiceRevenue);
+                    folioPayments = snaps.Sum(x => x.Payments);
+                    expense = snaps.Sum(x => x.Expenses);
+                    if (from <= today && today <= to)
+                    {
+                        var liveStart = today.ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+                        var liveEnd = today.AddDays(1).ToDateTime(TimeOnly.MinValue).ToUniversalTime();
+                        var live = await db.Charges.Where(x => resIds.Contains(x.ReservationId) && x.PostedAtUtc >= liveStart && x.PostedAtUtc < liveEnd)
+                            .GroupBy(x => x.Category).Select(g => new { g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync();
+                        roomRevenue += live.Where(x => x.Key == "ROOM").Sum(x => x.Amount);
+                        serviceRevenue += live.Where(x => x.Key == "SERVICE").Sum(x => x.Amount);
+                        folioPayments += await db.Payments.Where(x => resIds.Contains(x.ReservationId) && x.PaidAtUtc >= liveStart && x.PaidAtUtc < liveEnd).SumAsync(x => (decimal?)x.Amount) ?? 0;
+                        expense += await db.Vouchers.Where(x => x.PropertyId == prop.Id && x.Type == "EXPENSE" && x.CreatedAtUtc >= liveStart && x.CreatedAtUtc < liveEnd).SumAsync(x => (decimal?)x.Amount) ?? 0;
+                    }
+                }
+                else
+                {
+                    var c = await db.Charges.Where(x => resIds.Contains(x.ReservationId) && x.PostedAtUtc >= start && x.PostedAtUtc < end)
+                        .GroupBy(x => x.Category).Select(g => new { g.Key, Amount = g.Sum(x => x.Amount) }).ToListAsync();
+                    roomRevenue = c.Where(x => x.Key == "ROOM").Sum(x => x.Amount);
+                    serviceRevenue = c.Where(x => x.Key == "SERVICE").Sum(x => x.Amount);
+                    folioPayments = await db.Payments.Where(x => resIds.Contains(x.ReservationId) && x.PaidAtUtc >= start && x.PaidAtUtc < end).SumAsync(x => (decimal?)x.Amount) ?? 0;
+                    expense = await db.Vouchers.Where(x => x.PropertyId == prop.Id && x.Type == "EXPENSE" && x.CreatedAtUtc >= start && x.CreatedAtUtc < end).SumAsync(x => (decimal?)x.Amount) ?? 0;
+                }
                 var retail = await db.RetailSales.Where(x => x.PropertyId == prop.Id && x.SoldAtUtc >= start && x.SoldAtUtc < end).SumAsync(x => (decimal?)x.TotalAmount) ?? 0;
-                var vouchers = await db.Vouchers.Where(x => x.PropertyId == prop.Id && x.CreatedAtUtc >= start && x.CreatedAtUtc < end).ToListAsync();
+                var otherReceipt = await db.Vouchers.Where(x => x.PropertyId == prop.Id && x.Type == "RECEIPT" && x.CreatedAtUtc >= start && x.CreatedAtUtc < end).SumAsync(x => (decimal?)x.Amount) ?? 0;
                 var debt = await db.Debts.Where(x => x.PropertyId == prop.Id && x.Status == "OPEN").SumAsync(x => (decimal?)x.OutstandingAmount) ?? 0;
                 var rooms = await db.Rooms.CountAsync(x => x.PropertyId == prop.Id && !x.IsOutOfOrder);
                 var inHouse = await db.Reservations.CountAsync(x => x.PropertyId == prop.Id && x.Status == "CHECKED_IN");
@@ -439,16 +535,15 @@ public static class AdvancedEndpoints
                 var roomNights = reservedDates.Sum(x => Math.Max(0, Math.Min(x.CheckOutDate.DayNumber, to.DayNumber + 1) - Math.Max(x.CheckInDate.DayNumber, from.DayNumber)));
                 var availableNights = rooms * (to.DayNumber - from.DayNumber + 1);
                 var approxOccupancy = availableNights > 0 ? Math.Round(100m * roomNights / availableNights, 1) : 0m;
-                var roomRevenue = c.Where(x => x.Category == "ROOM").Sum(x => x.Amount);
                 var adr = roomNights > 0 ? Math.Round(roomRevenue / roomNights, 0) : 0m;
                 var revpar = availableNights > 0 ? Math.Round(roomRevenue / availableNights, 0) : 0m;
                 all.Add(new { propertyId = prop.Id, propertyCode = prop.Code, propertyName = prop.Name, rooms, inHouse, soldRoomNights = roomNights, approxOccupancyPercent = approxOccupancy, adr, revpar,
-                    roomRevenue, serviceRevenue = c.Where(x => x.Category == "SERVICE").Sum(x => x.Amount),
-                    retailRevenue = retail, folioPayments = p.Sum(x => x.Amount), expense = vouchers.Where(x => x.Type == "EXPENSE").Sum(x => x.Amount),
-                    otherReceipt = vouchers.Where(x => x.Type == "RECEIPT").Sum(x => x.Amount), outstandingDebt = debt });
+                    roomRevenue, serviceRevenue, retailRevenue = retail, folioPayments, expense, otherReceipt, outstandingDebt = debt });
             }
             return Results.Ok(new { from, to, properties = all,
-                note = "Doanh thu demo tính theo ngày ghi charge, không phân bổ đêm. Tồn công nợ là số dư hiện tại, không phải dư cuối kỳ." });
+                note = to.DayNumber - from.DayNumber + 1 <= 31
+                    ? "Ngày đã qua trong khoảng 31 ngày đọc một dòng mỗi cơ sở mỗi ngày. Hôm nay vẫn tính trực tiếp. Doanh thu theo ngày ghi charge, không phân bổ đêm."
+                    : "Khoảng dài hơn 31 ngày tính trực tiếp. Doanh thu theo ngày ghi charge, không phân bổ đêm." });
         });
         api.MapGet("/reports/agencies", async (int propertyId, DateOnly from, DateOnly to, ClaimsPrincipal actor, PmsDbContext db) => {
             if (!Ops.CanManage(actor) || !Ops.HasScope(actor, propertyId)) return Results.Forbid();
@@ -471,12 +566,13 @@ public static class AdvancedEndpoints
             if (!Ops.CanManageFinance(actor) || !Ops.HasScope(actor, shift.PropertyId)) return Results.Forbid();
             var received = await db.Payments.Where(x => x.ShiftId == id && x.Method == "CASH").SumAsync(x => (decimal?)x.Amount) ?? 0;
             var retail = await db.RetailSales.Where(x => x.ShiftId == id && x.PaymentMethod == "CASH").SumAsync(x => (decimal?)x.TotalAmount) ?? 0;
+            var outside = await db.VirtualFolioPayments.Where(x => x.ShiftId == id && x.Method == "CASH").SumAsync(x => (decimal?)x.Amount) ?? 0;
             var vouchers = await db.Vouchers.Where(x => x.ShiftId == id && x.Method == "CASH").ToListAsync();
             var receipt = vouchers.Where(x => x.Type == "RECEIPT").Sum(x => x.Amount);
             var expense = vouchers.Where(x => x.Type == "EXPENSE").Sum(x => x.Amount);
-            var expected = shift.OpeningAmount + received + retail + receipt - expense;
+            var expected = shift.OpeningAmount + received + retail + outside + receipt - expense;
             return Results.Ok(new { shift.Id, shift.PropertyId, shift.UserId, shift.Status, shift.OpeningAmount, roomCash = received,
-                retailCash = retail, otherCashReceipt = receipt, cashExpense = expense, expectedClosing = expected,
+                retailCash = retail + outside, otherCashReceipt = receipt, cashExpense = expense, expectedClosing = expected,
                 actualClosing = shift.ClosingAmount, variance = shift.ClosingAmount.HasValue ? shift.ClosingAmount - expected : (decimal?)null });
         });
         api.MapGet("/reports/stock", async (int propertyId, ClaimsPrincipal actor, PmsDbContext db) => {
@@ -698,7 +794,7 @@ public record RoomBuildingInput(int? BuildingId);
 public record RatePlanInput(int PropertyId, string Code, string Name, string Mode, decimal BasePrice, int IncludedHours, decimal ExtraHourPrice);
 public record WaitlistInput(int PropertyId, string GuestName, string? Phone, DateOnly CheckInDate, DateOnly CheckOutDate, int? RoomTypeId, string? Note);
 public record AssignWaitlistInput(int RoomId);
-public record GroupBookingInput(int PropertyId, string GuestName, string? Phone, DateOnly CheckInDate, DateOnly CheckOutDate, int[] RoomIds, string? BookingSource, string? Note);
+public record GroupBookingInput(int PropertyId, string GuestName, string? Phone, DateOnly CheckInDate, DateOnly CheckOutDate, int[] RoomIds, string? BookingSource, string? Note, DateOnly? CutoffDate = null);
 public record GroupMembershipInput(int PropertyId, int ReservationId);
 public record TransferChargeInput(int TargetStayId, int Quantity);
 public record GroupPayInput(int PropertyId, decimal Amount, string Method, string? IdempotencyKey = null);

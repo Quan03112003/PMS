@@ -91,10 +91,12 @@ public sealed class DebtReceivable
 {
     public int Id { get; set; }
     public int PropertyId { get; set; }
-    public int ReservationId { get; set; }
+    public int? ReservationId { get; set; }
+    public int? VirtualFolioId { get; set; }
     [Precision(18,2)] public decimal OriginalAmount { get; set; }
     [Precision(18,2)] public decimal OutstandingAmount { get; set; }
     [MaxLength(20)] public string Status { get; set; } = "OPEN";
+    [MaxLength(20)] public string Origin { get; set; } = "CHECKOUT";
     [MaxLength(400)] public string? Note { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? SettledAtUtc { get; set; }

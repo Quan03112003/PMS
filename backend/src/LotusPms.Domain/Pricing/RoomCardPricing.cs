@@ -26,6 +26,17 @@ public static class RoomCardPricing
             if (weekday > 0) lines.Add(new Line("ROOM", $"{weekday} đêm ngày thường", weekday, weekdayPrice, weekday * weekdayPrice));
             if (weekend > 0) lines.Add(new Line("ROOM", $"{weekend} đêm cuối tuần", weekend, weekendPrice, weekend * weekendPrice));
         }
+        else if (mode is "WEEK" or "MONTH")
+        {
+            var block = mode == "WEEK" ? 7 : 30;
+            var blocks = Math.Max(1, nights / block);
+            var unit = roomOverride ?? (mode == "WEEK"
+                ? type.WeeklyRate ?? ((type.WeekdayRate ?? type.BaseRate) * 7)
+                : type.MonthlyRate ?? ((type.WeekdayRate ?? type.BaseRate) * 30));
+            var label = mode == "WEEK" ? $"{blocks} tuần" : $"{blocks} tháng (30 đêm)";
+            lines.Add(new Line("ROOM", label, blocks, unit, blocks * unit));
+            nights = blocks;
+        }
         else if (mode == "HOURLY")
         {
             var block = roomOverride ?? plan?.BasePrice ?? type.HourlyRate ?? type.BaseRate;
@@ -56,7 +67,9 @@ public static class RoomCardPricing
         return (lines, roomUnit);
     }
 
-    public static string Serialize(string source, string mode, IReadOnlyList<Line> lines, RoomType type, RatePlan? plan, decimal? roomOverride)
+    static readonly JsonSerializerOptions SnapshotJson = new(JsonSerializerDefaults.Web);
+
+    public static string Serialize(string source, string mode, IReadOnlyList<Line> lines, RoomType type, RatePlan? plan, decimal? roomOverride, IReadOnlyList<NightAmount>? nights = null)
     {
         var weekday = roomOverride ?? plan?.BasePrice ?? type.WeekdayRate ?? type.BaseRate;
         var weekend = roomOverride ?? (plan != null ? plan.BasePrice : type.WeekendRate ?? type.WeekdayRate ?? type.BaseRate);
@@ -67,8 +80,9 @@ public static class RoomCardPricing
             hourlyUnit = roomOverride ?? plan?.BasePrice ?? type.HourlyRate ?? type.BaseRate,
             extraHourUnit = plan?.ExtraHourPrice ?? type.ExtraHourRate ?? 0,
             extraPersonUnit = type.ExtraPersonRate ?? 0,
-            capacity = Math.Max(1, type.Capacity)
-        });
+            capacity = Math.Max(1, type.Capacity),
+            nights = nights?.OrderBy(x => x.Date).Select(x => new { date = x.Date, amount = x.Amount })
+        }, SnapshotJson);
     }
 
     public static List<Line> ExtendNights(string? json, DateOnly from, DateOnly to, int adults, int children)
@@ -142,17 +156,90 @@ public static class RoomCardPricing
             var result = new List<Line>();
             foreach (var line in lines.EnumerateArray())
             {
-                var amount = line.GetProperty("amount").GetDecimal();
+                if (!Field(line, "amount", out var amountNode)) continue;
+                var amount = amountNode.GetDecimal();
                 if (amount <= 0) continue;
                 result.Add(new Line(
-                    line.GetProperty("category").GetString() ?? "ROOM",
-                    line.GetProperty("description").GetString() ?? "Tiền phòng",
-                    line.GetProperty("quantity").GetInt32(),
-                    line.GetProperty("unitPrice").GetDecimal(),
+                    Field(line, "category", out var category) ? category.GetString() ?? "ROOM" : "ROOM",
+                    Field(line, "description", out var description) ? description.GetString() ?? "Tiền phòng" : "Tiền phòng",
+                    Field(line, "quantity", out var quantity) ? quantity.GetInt32() : 1,
+                    Field(line, "unitPrice", out var unitPrice) ? unitPrice.GetDecimal() : amount,
                     amount));
             }
             return result;
         }
         catch (JsonException) { return []; }
+    }
+
+    static bool Field(JsonElement line, string camel, out JsonElement value)
+    {
+        if (line.TryGetProperty(camel, out value)) return true;
+        var pascal = char.ToUpperInvariant(camel[0]) + camel[1..];
+        return line.TryGetProperty(pascal, out value);
+    }
+
+    public sealed record NightAmount(DateOnly Date, decimal Amount);
+    public sealed record NightCard(DateOnly Date, decimal Card, decimal Payable, decimal Floor);
+
+    public static List<NightCard> Cards(DateOnly checkIn, DateOnly checkOut, decimal weekday, decimal weekend, RoomType type, decimal percent)
+    {
+        var list = new List<NightCard>();
+        if (checkIn >= checkOut) return list;
+        for (var day = checkIn; day < checkOut; day = day.AddDays(1))
+        {
+            var card = IsWeekend(day) ? weekend : weekday;
+            var floor = StayPrice.Floor(type, "OVERNIGHT", card);
+            list.Add(new NightCard(day, card, LoyaltyRules.Payable(card, percent, floor), floor));
+        }
+        return list;
+    }
+
+    public static string? RejectNights(IReadOnlyList<NightCard> cards, IReadOnlyList<NightAmount> asked)
+    {
+        if (asked.Count != cards.Count) return "Cần nhập giá cho đúng từng đêm của phiếu.";
+        foreach (var card in cards)
+        {
+            var row = asked.FirstOrDefault(x => x.Date == card.Date);
+            if (row == null) return $"Thiếu giá đêm {card.Date:dd/MM/yyyy}.";
+            if (row.Amount + 0.01m < card.Floor)
+                return $"Đêm {card.Date:dd/MM/yyyy}: giá {row.Amount:N0} thấp hơn sàn {card.Floor:N0}.";
+        }
+        return null;
+    }
+
+    public static List<Line> WithNights(List<Line> lines, IReadOnlyList<NightAmount> nights)
+    {
+        var room = nights.OrderBy(x => x.Date).Select(n => new Line("ROOM", $"Đêm {n.Date:dd/MM/yyyy}", 1, n.Amount, n.Amount)).ToList();
+        room.AddRange(lines.Where(x => x.Category != "ROOM"));
+        return room;
+    }
+
+    public static List<NightAmount> ReadNights(string? json, DateOnly checkIn, DateOnly checkOut)
+    {
+        var list = new List<NightAmount>();
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("nights", out var nights) && nights.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var row in nights.EnumerateArray())
+                        list.Add(new NightAmount(DateOnly.Parse(row.GetProperty("date").GetString()!), row.GetProperty("amount").GetDecimal()));
+                    if (list.Count > 0) return list.OrderBy(x => x.Date).ToList();
+                }
+                if (doc.RootElement.TryGetProperty("weekdayUnit", out var weekdayNode))
+                {
+                    var weekday = weekdayNode.GetDecimal();
+                    var weekend = doc.RootElement.GetProperty("weekendUnit").GetDecimal();
+                    for (var day = checkIn; day < checkOut; day = day.AddDays(1))
+                        list.Add(new NightAmount(day, IsWeekend(day) ? weekend : weekday));
+                    return list;
+                }
+            }
+            catch (JsonException) { }
+            catch (FormatException) { }
+        }
+        return list;
     }
 }

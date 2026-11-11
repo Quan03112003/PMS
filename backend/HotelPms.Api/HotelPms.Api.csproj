@@ -13,4 +13,8 @@
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.0.1" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\src\LotusPms.Application\LotusPms.Application.csproj" />
+    <ProjectReference Include="..\src\LotusPms.Infrastructure\LotusPms.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>

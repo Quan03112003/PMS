@@ -117,8 +117,7 @@ public static class V5Foundation
 
         api.MapGet("/tax-rules", async (int propertyId, ClaimsPrincipal user, PmsDbContext db) => {
             if (!Ops.CanManage(user) || !Ops.HasScope(user, propertyId)) return Results.Forbid();
-            return Results.Ok(await db.TaxRules.AsNoTracking().Where(x => x.PropertyId == propertyId)
-                .OrderBy(x => x.Code).ThenByDescending(x => x.EffectiveFrom).ToListAsync());
+            return Results.Ok(await CatalogCache.TaxRulesFor(db, propertyId));
         });
 
         api.MapPost("/tax-rules", async (TaxRuleInput req, ClaimsPrincipal actor, PmsDbContext db) => {
@@ -140,6 +139,7 @@ public static class V5Foundation
             };
             db.TaxRules.Add(rule);
             await db.SaveChangesAsync();
+            CatalogCache.ForgetTaxRules(req.PropertyId);
             await Ops.Log(db, actor, req.PropertyId, "TAX_RULE_CREATE", "TaxRule", rule.Id, $"{code} {req.RatePercent}%");
             return Results.Ok(rule);
         });

@@ -4,39 +4,6 @@ using System.Security.Claims;
 
 namespace HotelPms.Api;
 
-public sealed class ShiftHandover
-{
-    public int Id { get; set; }
-    public int PropertyId { get; set; }
-    public int CashShiftId { get; set; }
-    public int FromUserId { get; set; }
-    public int ToUserId { get; set; }
-    [MaxLength(20)] public string Status { get; set; } = "SUBMITTED";
-    [Precision(18, 2)] public decimal OpeningAmount { get; set; }
-    [Precision(18, 2)] public decimal ExpectedCash { get; set; }
-    [Precision(18, 2)] public decimal DeclaredCash { get; set; }
-    [Precision(18, 2)] public decimal Variance { get; set; }
-    [MaxLength(500)] public string? Note { get; set; }
-    public DateTime SubmittedAtUtc { get; set; } = DateTime.UtcNow;
-    public DateTime? AcknowledgedAtUtc { get; set; }
-    public int? AcknowledgedByUserId { get; set; }
-}
-public sealed class ShiftHandoverItem
-{
-    public int Id { get; set; }
-    public int HandoverId { get; set; }
-    [MaxLength(24)] public string Kind { get; set; } = "";
-    [MaxLength(40)] public string Reference { get; set; } = "";
-    [MaxLength(240)] public string Summary { get; set; } = "";
-}
-public sealed class ShiftHandoverNote
-{
-    public int Id { get; set; }
-    public int HandoverId { get; set; }
-    public int AuthorUserId { get; set; }
-    [MaxLength(500)] public string Text { get; set; } = "";
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-}
 public record HandoverInput(int ToUserId, decimal DeclaredCash, string? Note);
 public record HandoverNoteInput(string? Text);
 
@@ -132,9 +99,10 @@ public static class ShiftHandoverEndpoints
     {
         var cashIn = await db.Payments.Where(x => x.ShiftId == shift.Id && x.Method == "CASH").SumAsync(x => (decimal?)x.Amount) ?? 0;
         var retail = await db.RetailSales.Where(x => x.ShiftId == shift.Id && x.PaymentMethod == "CASH").SumAsync(x => (decimal?)x.TotalAmount) ?? 0;
+        var outside = await db.VirtualFolioPayments.Where(x => x.ShiftId == shift.Id && x.Method == "CASH").SumAsync(x => (decimal?)x.Amount) ?? 0;
         var receipts = await db.Vouchers.Where(x => x.ShiftId == shift.Id && x.Method == "CASH" && x.Type == "RECEIPT").SumAsync(x => (decimal?)x.Amount) ?? 0;
         var expenses = await db.Vouchers.Where(x => x.ShiftId == shift.Id && x.Method == "CASH" && x.Type == "EXPENSE").SumAsync(x => (decimal?)x.Amount) ?? 0;
-        return shift.OpeningAmount + cashIn + retail + receipts - expenses;
+        return shift.OpeningAmount + cashIn + retail + outside + receipts - expenses;
     }
 
     private static async Task<List<ItemDraft>> Snapshot(PmsDbContext db, int propertyId)
@@ -188,7 +156,7 @@ public static class ShiftHandoverEndpoints
             join g in db.Guests on r.GuestId equals g.Id
             where r.PropertyId == propertyId && g.LoyaltyCard != null && g.LoyaltyCard != "" && (r.Status == "CONFIRMED" || r.Status == "CHECKED_IN")
             orderby r.Id
-            select new ItemDraft("MEMBER", r.Code, g.FullName + " · thẻ " + g.LoyaltyCard)).Take(12).ToListAsync());
+            select new ItemDraft("MEMBER", r.Code, g.FullName + " · " + (g.LoyaltyCard == "VANG" ? "Vàng 10%" : g.LoyaltyCard == "BAC" ? "Bạc 5%" : "thẻ " + g.LoyaltyCard))).Take(12).ToListAsync());
         return rows.Select(x => x with { Reference = Clip(x.Reference, 40), Summary = Clip(x.Summary, 240) }).ToList();
     }
 

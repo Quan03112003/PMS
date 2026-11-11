@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService } from './api.service';
+import { ApiService } from '../../core/services/api.service';
+
 
 function day(delta = 0): string {
   const d = new Date(); d.setDate(d.getDate() + delta);

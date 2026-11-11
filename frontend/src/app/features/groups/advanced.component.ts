@@ -1,8 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ApiService } from './api.service';
-import { openCompanySheet } from './company-sheet';
+import { ApiService } from '../../core/services/api.service';
+
+import { openCompanySheet } from '../../shared/company-sheet';
 
 function day(delta = 0): string {
   const d = new Date(); d.setDate(d.getDate() + delta);
@@ -51,7 +52,13 @@ export class AdvancedComponent implements OnChanges {
   groupRoomOccupants: any[] = [];
   selectedGroupReservation = 0;
   occupantForm: any = { fullName: '', phone: '', nationality: '', identityLast4: '', isPrimary: true };
+  master: any = null;
+  masterServiceId = 0;
+  masterPay = 0;
+  masterMethod = 'TRANSFER';
   groupMethod = 'TRANSFER';
+  reassignReservationId = 0;
+  reassignRoomId = 0;
   groupAmount = 0;
   selectedStay = 0;
   selectedCharge = 0;
@@ -65,10 +72,16 @@ export class AdvancedComponent implements OnChanges {
   adjustForm: any = { stayId: null, ratePlanId: null, kind: 'LATE_CHECKOUT', actualAtLocal: '' };
   precheckResult: any = null;
   prechecking = false;
+  debtStatus = '';
+  debtSource = '';
+  virtualId = 0;
+  virtualOpen: any = null;
+  fundType = '';
+  fundMoves: any[] = [];
   titles: Record<string, string> = {
     waitlist: 'Đặt phòng hàng đợi', groups: 'Khách đoàn & thanh toán hộ', transfers: 'Chuyển dịch vụ giữa các phòng',
     rates: 'Bảng giá giờ / ngày / đêm', buildings: 'Tòa nhà & phân phòng', stockledger: 'Nhập xuất tồn kho',
-    suppliers: 'Nhà cung cấp', retail: 'Bán hàng ngoài phòng', vouchers: 'Phiếu thu – phiếu chi',
+    suppliers: 'Nhà cung cấp', retail: 'Bán hàng ngoài phòng', virtualFolios: 'Thu ngoài phòng', vouchers: 'Phiếu thu – phiếu chi', cashFunds: 'Quỹ tiền',
     debts: 'Công nợ khách hàng', assets: 'Tài sản khách gửi', dayclose: 'Snapshot chốt ngày',
     chain: 'Tổng hợp toàn chuỗi', collections: 'Thu tiền, tạm ứng, trả lại', receipts: 'Phiếu thanh toán', agencyReports: 'Báo cáo hiệu quả đại lý', shiftReconcile: 'Đối soát tiền mặt theo ca', registration: 'Danh sách khai báo lưu trú',
     pricingQuote: 'Báo giá & phụ thu',
@@ -83,6 +96,15 @@ export class AdvancedComponent implements OnChanges {
   constructor(private api: ApiService) { this.resetForm(); }
   get canManage(): boolean { return ['CHAIN_ADMIN', 'PROPERTY_MANAGER'].includes(this.user?.role); }
   get canManageFinance(): boolean { return this.canManage || this.user?.role === 'ACCOUNTING_AGENT'; }
+  vi(code: string, kind: 'folio' | 'debt' | 'source' | 'origin'): string {
+    const words: Record<string, Record<string, string>> = {
+      folio: { OPEN: 'Đang mở', SETTLED: 'Đã thu đủ' },
+      debt: { OPEN: 'Còn nợ', SETTLED: 'Đã thu đủ' },
+      source: { DIRECT: 'Trực tiếp', OTA: 'OTA', AGENCY: 'Đại lý', PHONE: 'Điện thoại', NGOAI: 'Ngoài phòng' },
+      origin: { CITY_LEDGER: 'City Ledger', CHECKOUT: 'Trả phòng' }
+    };
+    return words[kind][code] || code || '—';
+  }
   get isChainAdmin(): boolean { return this.user?.role === 'CHAIN_ADMIN'; }
   get hotel(): any { return this.properties?.find((p: any) => p.id === Number(this.propertyId)) || {}; }
   get reportTotals(): any {
@@ -111,27 +133,32 @@ export class AdvancedComponent implements OnChanges {
     this.error = ''; const id = this.propertyId;
     const paths: Record<string, string> = {
       waitlist: '/waitlist', groups: '/groups', rates: '/rate-plans', buildings: '/buildings',
-      stockledger: '/stock/movements', suppliers: '/suppliers', retail: '/retail-sales',
+      stockledger: '/stock/movements', suppliers: '/suppliers', retail: '/retail-sales', virtualFolios: '/virtual-folios',
       vouchers: '/vouchers', debts: '/debts', assets: '/guest-assets', dayclose: '/daily-closes',
       taxRules: '/tax-rules', holidayRates: '/holiday-rates', eInvoices: '/e-invoices'
     };
     if (this.view === 'adjustmentVouchers') this.fetch(`/adjustment-vouchers?propertyId=${id}${this.voucherStatus ? '&status=' + this.voucherStatus : ''}`);
     if (['adjustmentVouchers', 'eInvoices'].includes(this.view)) this.fetch(`/stays?propertyId=${id}`, 'stays');
-    if (paths[this.view]) this.fetch(`${paths[this.view]}?propertyId=${id}`);
+    if (paths[this.view]) {
+      let extra = ['vouchers', 'debts'].includes(this.view) ? `&from=${this.from}&to=${this.to}` : '';
+      if (this.view === 'debts') extra += `&status=${this.debtStatus || ''}&source=${this.debtSource || ''}`;
+      this.fetch(`${paths[this.view]}?propertyId=${id}${extra}`);
+    }
     if (['waitlist', 'groups', 'buildings'].includes(this.view)) this.fetch(`/rooms?propertyId=${id}`, 'rooms');
     if (['waitlist', 'groups'].includes(this.view)) this.fetch(`/room-types?propertyId=${id}`, 'buildings');
-    if (['stockledger', 'retail'].includes(this.view)) this.fetch(`/services?propertyId=${id}`, 'services');
+    if (['stockledger', 'retail', 'virtualFolios'].includes(this.view)) this.fetch(`/services?propertyId=${id}`, 'services');
     if (this.view === 'stockledger') { this.fetch(`/suppliers?propertyId=${id}`, 'suppliers'); this.loadStockCard(); }
     if (['debts', 'assets', 'transfers'].includes(this.view)) this.fetch(`/stays?propertyId=${id}`, 'stays');
     if (this.view === 'transfers') this.fetch(`/rooms?propertyId=${id}`, 'rooms');
     if (this.view === 'debts') this.fetch(`/checkouts?propertyId=${id}`, 'bookings');
-    if (this.view === 'registration') this.fetch(`/reservations?propertyId=${id}`, 'items');
+    if (this.view === 'registration') this.fetch(`/reservations?propertyId=${id}&from=${this.from}&to=${this.to}`, 'items');
     if (this.view === 'chain') this.loadReport();
     if (this.view === 'collections') this.loadCash();
     if (this.view === 'receipts') this.loadReceipts();
     if (this.view === 'agencyReports') this.loadAgencyReport();
     if (this.view === 'shiftReconcile') this.fetch(`/shifts?propertyId=${id}`, 'items');
-    if (this.view === 'groups') this.searchRooms();
+    if (this.view === 'groups') { this.searchRooms(); this.fetch(`/services?propertyId=${id}`, 'services'); }
+    if (this.view === 'cashFunds') this.loadFunds();
     if (this.view === 'pricingQuote') {
       this.fetch(`/rate-plans?propertyId=${id}`, 'ratePlans');
       this.fetch(`/stays?propertyId=${id}`, 'stays');
@@ -196,7 +223,43 @@ export class AdvancedComponent implements OnChanges {
       .subscribe({ next: r => this.groupRooms = r, error: e => this.error = e?.error?.message || 'Không tải được phòng' });
   }
   toggleRoom(id: number): void { this.selectedRooms = this.selectedRooms.includes(id) ? this.selectedRooms.filter(x => x !== id) : [...this.selectedRooms, id]; }
-  createGroup(): void { this.submit('/group-bookings', { ...this.form, roomIds: this.selectedRooms, bookingSource: 'DIRECT' }, () => this.selectedRooms = []); }
+  createGroup(): void { this.submit('/group-bookings', { ...this.form, roomIds: this.selectedRooms, bookingSource: 'DIRECT', cutoffDate: this.form.cutoffDate || null }, () => this.selectedRooms = []); }
+  openMaster(): void {
+    this.api.post<any>('/groups/master', { propertyId: this.propertyId, code: this.selectedGroup, guestName: this.selectedGroup }).subscribe({ next: r => this.master = r, error: e => this.error = e?.error?.message || 'Không mở được sổ đoàn' });
+  }
+  addMasterLine(): void {
+    this.api.post<any>('/groups/master/lines', { propertyId: this.propertyId, code: this.selectedGroup, serviceItemId: +this.masterServiceId }).subscribe({ next: r => this.master = r, error: e => this.error = e?.error?.message || 'Không ghi được dịch vụ' });
+  }
+  payMaster(): void {
+    this.api.post<any>('/groups/master/payments', { propertyId: this.propertyId, code: this.selectedGroup, method: this.masterMethod, amount: +this.masterPay, idempotencyKey: crypto.randomUUID() }).subscribe({ next: r => { this.master = r; this.success = 'Đã thu sổ đoàn'; }, error: e => this.error = e?.error?.message || 'Không thu được' });
+  }
+  reassignRoom(): void {
+    this.api.post<any>('/groups/reassign', { propertyId: this.propertyId, code: this.selectedGroup, reservationId: +this.reassignReservationId, roomId: +this.reassignRoomId }).subscribe({ next: () => { this.success = 'Đã đổi phòng'; this.loadGroupOccupants(); }, error: e => this.error = e?.error?.message || 'Không đổi được phòng' });
+  }
+  printGroupInvoices(): void {
+    this.api.get<any[]>(`/groups/invoices?propertyId=${this.propertyId}&code=${encodeURIComponent(this.selectedGroup)}`).subscribe({ next: rows => {
+      const body = rows.map(r => `<tr><td>${r.number}</td><td>${r.fullName}</td><td>${r.code}</td><td>${r.charges}</td><td>${r.payments}</td></tr>`).join('');
+      const sheet = window.open('', '_blank', 'noopener');
+      if (!sheet) return;
+      sheet.document.write(`<h1>Hóa đơn phòng đoàn ${this.selectedGroup}</h1><table border="1" cellpadding="6"><tr><th>Phòng</th><th>Khách</th><th>Phiếu</th><th>Ghi sổ</th><th>Đã thu</th></tr>${body}</table>`);
+      sheet.print();
+    }, error: e => this.error = e?.error?.message || 'Không in được' });
+  }
+  releaseGroup(): void { this.submit(`/groups/${encodeURIComponent(this.selectedGroup)}/release?propertyId=${this.propertyId}`, {}); }
+  loadFunds(): void {
+    this.fetch(`/cash-accounts?propertyId=${this.propertyId}`);
+    const type = this.fundType ? `&type=${this.fundType}` : '';
+    this.api.get<any[]>(`/reports/cash-funds?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}${type}`).subscribe({ next: rows => this.fundMoves = rows, error: e => this.error = e?.error?.message || 'Không tải được dòng quỹ' });
+  }
+  createFund(): void { this.submit('/cash-accounts', { propertyId: this.propertyId, name: this.form.guestName }); }
+  moveFund(kind: 'deposit' | 'withdraw'): void { this.submit(`/cash-accounts/${this.form.accountId}/${kind}`, { amount: +this.form.amount, method: this.form.method || 'TRANSFER', note: this.form.note }, () => this.loadFunds()); }
+  transferFund(): void { this.submit('/cash-accounts/transfer', { propertyId: this.propertyId, fromAccountId: +this.form.accountId, toAccountId: +this.form.counterAccountId, amount: +this.form.amount, note: this.form.note }, () => this.loadFunds()); }
+  exportFunds(): void {
+    this.api.getText(`/reports/cash-funds/export?propertyId=${this.propertyId}&from=${this.from}&to=${this.to}&type=${this.fundType || ''}`).subscribe({ next: text => {
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'quy-tien.csv'; link.click();
+    }, error: e => this.error = e?.error?.message || 'Không xuất được Excel' });
+  }
   selectGroup(code: string): void { this.selectedGroup = code; this.attachReservationId = 0; this.loadGroupOccupants(); }
   loadGroupOccupants(): void {
     if (!this.selectedGroup) return;
@@ -245,6 +308,27 @@ export class AdvancedComponent implements OnChanges {
   createRetailSale(): void { this.submit('/retail-sales', { ...this.form, serviceItemId: +this.form.serviceItemId, quantity: +this.form.quantity }); }
   createVoucher(): void { this.submit('/vouchers', { ...this.form, amount: +this.form.amount }); }
   collectDebt(id: number): void { this.submit(`/debts/${id}/collect`, { amount: +this.form.amount, method: this.form.method, reference: 'COLLECT-DEBT', idempotencyKey: crypto.randomUUID() }); }
+  exportDebts(): void {
+    const q = `propertyId=${this.propertyId}&from=${this.from}&to=${this.to}&status=${this.debtStatus || ''}&source=${this.debtSource || ''}`;
+    this.api.getText('/debts/export?' + q).subscribe({ next: text => {
+      const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'cong-no.csv'; link.click();
+    }, error: e => this.error = e?.error?.message || 'Không xuất được Excel' });
+  }
+  openVirtual(row: any): void {
+    this.virtualId = row.id;
+    this.api.get<any>(`/virtual-folios/${row.id}`).subscribe({ next: x => this.virtualOpen = x, error: e => this.error = e?.error?.message || 'Không mở được folio' });
+  }
+  createVirtual(): void { this.submit('/virtual-folios', { propertyId: this.propertyId, guestName: this.form.guestName, phone: this.form.phone, note: this.form.note }); }
+  addVirtualService(): void {
+    this.submit(`/virtual-folios/${this.virtualId}/lines`, { serviceId: +this.form.serviceItemId, quantity: +this.form.quantity || 1 }, () => this.openVirtual({ id: this.virtualId }));
+  }
+  addVirtualDiscount(): void {
+    this.submit(`/virtual-folios/${this.virtualId}/lines`, { discountAmount: +this.form.amount, description: this.form.note || 'Giảm giá' }, () => this.openVirtual({ id: this.virtualId }));
+  }
+  payVirtual(): void {
+    this.submit(`/virtual-folios/${this.virtualId}/payments`, { amount: +this.form.amount, method: this.form.method || 'TRANSFER', reference: 'Thu ngoài phòng', idempotencyKey: crypto.randomUUID() }, () => this.openVirtual({ id: this.virtualId }));
+  }
   debtCheckout(id: number): void { this.submit(`/stays/${id}/checkout-debt`, { note: this.form.note || 'Công nợ chờ thu' }); }
   restoreStay(id: number): void { this.submit(`/stays/${id}/restore`, {}); }
   createAsset(): void { this.submit('/guest-assets', { ...this.form, stayId: +this.form.stayId, quantity: +this.form.quantity }); }
@@ -280,6 +364,7 @@ export class AdvancedComponent implements OnChanges {
     const text = Math.abs(value).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return value < 0 ? `(${text})` : text;
   }
+  stayInRange(row: { checkInDate: string }): boolean { return row.checkInDate >= this.from && row.checkInDate <= this.to; }
   printSheet(id: string): void { openCompanySheet(id); }
   loadReport(): void { this.api.get(`/reports/chain?from=${this.from}&to=${this.to}`).subscribe({ next: x => this.report = x, error: e => this.error = e?.error?.message || 'Không tải được báo cáo' }); }
   exportRegistration(): void {

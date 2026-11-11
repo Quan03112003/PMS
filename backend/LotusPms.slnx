@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LotusPms.Application/LotusPms.Application.csproj" />
+    <Project Path="src/LotusPms.Domain/LotusPms.Domain.csproj" />
+    <Project Path="src/LotusPms.Infrastructure/LotusPms.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LotusPms.UnitTests/LotusPms.UnitTests.csproj" />
+  </Folder>
+  <Project Path="HotelPms.Api/HotelPms.Api.csproj" />
+</Solution>

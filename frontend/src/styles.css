@@ -555,7 +555,7 @@ tr:hover td { background: #fafbfd; }
   color: #5c6778; background: #eef1f5; font-size: .68rem; font-weight: 800; white-space: nowrap;
 }
 .badge.checked-in, .badge.occupied { color: #2952b8; background: var(--accent-soft); }
-.badge.confirmed, .badge.arrival, .badge.open { background: var(--warn-soft); color: #a07a08; }
+.badge.confirmed, .badge.arrival, .badge.open, .badge.overdue { background: var(--warn-soft); color: #a07a08; }
 .badge.checked-out, .badge.inspected, .badge.vacant { background: var(--ok-soft); color: #238a55; }
 .badge.cancelled, .badge.maintenance, .badge.closed { background: #eef1f5; color: #667085; }
 .badge.dirty { background: #fff1e4; color: #c06a1c; }
@@ -604,8 +604,11 @@ tr:hover td { background: #fafbfd; }
 .room-tile:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
 .room-tile.occupied { background: #f7faff; border-left-color: var(--accent); }
 .room-tile.dirty { background: #fffaf4; border-left-color: var(--warn); }
-.room-tile.arrival { background: #f8f6ff; border-left-color: #7b68ee; }
+.room-tile.clean, .room-tile.vacant { background: #f4fbf7; border-left-color: var(--ok); }
+.room-tile.arrival, .room-tile.overdue { background: #f8f6ff; border-left-color: #7b68ee; }
+.room-tile.hold { background: #f7f8fb; border-left-color: #7d8da6; }
 .room-tile.maintenance { background: #f6f7f9; border-left-color: #98a2b3; }
+.badge.clean, .badge.hold { background: #eef3f8; color: #526077; }
 .room-top { display: flex; justify-content: space-between; align-items: center; }
 .room-number { font-family: var(--display); font-size: 1.25rem; letter-spacing: -.04em; font-weight: 700; color: #2b3348; }
 .room-symbol { color: #7a8499; font-size: .9rem; }
@@ -620,7 +623,24 @@ tr:hover td { background: #fafbfd; }
 .room-actions b { margin-right: 8px; }
 .tape-scroll { overflow: auto; }
 .tape { min-width: 860px; }
-.tape td, .tape th { font-size: .72rem; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.tape td, .tape th { font-size: .72rem; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.tape-card { margin: 12px 0; padding: 14px 16px; border: 1px solid #e4e9f2; border-radius: 14px; background: #fff; }
+.tape-card header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.tape-card header div { display: flex; align-items: center; gap: 8px; }
+.tape-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 16px; margin-top: 12px; }
+.tape-facts span { display: flex; flex-direction: column; gap: 2px; }
+.tape-facts small { color: #8b95a8; font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
+.tape-facts .wide { grid-column: 1 / -1; }
+.tape-actions { display: flex; gap: 8px; margin-top: 12px; }
+.tape-float { position: fixed; z-index: 80; width: 250px; padding: 10px 12px; border-radius: 10px; background: #1e293b; color: #fff; font-size: .75rem; line-height: 1.45; box-shadow: 0 10px 24px rgba(15, 23, 42, .22); pointer-events: none; }
+.bar-row { display: grid; grid-template-columns: 120px 1fr 110px; gap: 8px; align-items: center; margin: 6px 0; }
+.bar { height: 10px; background: #eef2f6; border-radius: 99px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: #0f6b4c; }
+.night-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
+.bar { height: 10px; background: #eef2f6; border-radius: 99px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: #0f6b4c; }
+.night-list label { display: flex; flex-direction: column; gap: 4px; font-size: .75rem; color: #667085; }
+.night-list input { width: 100%; }
 .tape td small { display: block; color: #8b95a8; font-weight: 500; }
 .tape-book { background: #fff6db; color: #8a6508; font-weight: 700; }
 .tape-in { background: #eaf0fb; color: #2952b8; font-weight: 700; }
@@ -789,6 +809,10 @@ tr:hover td { background: #fafbfd; }
 .toast button { color: #c5cedd; border: 0; background: transparent; }
 .toast.toast-error { border-left-color: var(--danger); }
 .toast.toast-error > span { background: var(--danger); }
+
+.permission-list { display: grid; gap: 8px; max-height: 420px; overflow: auto; margin: 8px 0 12px; }
+.permission-list label { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,.06); }
+.permission-list small { display: block; color: #667085; font-weight: 500; }
 
 @media (max-width: 1200px) {
   .room-grid { grid-template-columns: repeat(4, 1fr); }
