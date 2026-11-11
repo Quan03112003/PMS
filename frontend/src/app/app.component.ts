@@ -8,8 +8,10 @@ import { AdvancedComponent } from './features/groups/advanced.component';
 import { OtaComponent } from './features/ota/ota.component';
 import { RoadmapComponent } from './features/roadmap/roadmap.component';
 import { LanguageSwitchComponent } from './layout/language-switch.component';
+import { AiAssistantWidgetComponent } from './features/ai-assistant/ai-assistant-widget.component';
+import { AiKnowledgeAdminComponent } from './features/ai-assistant/ai-knowledge-admin.component';
 
-@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, AdvancedComponent, OtaComponent, RoadmapComponent, LanguageSwitchComponent], templateUrl: './app.component.html' })
+@Component({ selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, AdvancedComponent, OtaComponent, RoadmapComponent, LanguageSwitchComponent, AiAssistantWidgetComponent, AiKnowledgeAdminComponent], templateUrl: './app.component.html' })
 export class AppComponent implements OnInit, OnDestroy {
   user: any = null;
   token = '';
@@ -60,6 +62,7 @@ export class AppComponent implements OnInit, OnDestroy {
   listFrom = '';
   listTo = '';
   sidebarOpen = false;
+  aiOpen = false;
   bookingLayout: 'list' | 'tape' = 'list';
   tapeStart = localIsoDate(0);
   tapeHover: { lines: string[]; x: number; y: number } | null = null;
@@ -172,7 +175,8 @@ export class AppComponent implements OnInit, OnDestroy {
       ] },
       { id: 'users', label: 'Nhân viên & quyền' },
       { id: 'audit', label: 'Nhật ký thao tác' },
-      { id: 'roadmap', label: 'Lộ trình yêu cầu' }
+      { id: 'roadmap', label: 'Lộ trình yêu cầu' },
+      { id: 'ai-knowledge', label: 'Kho tri thức AI' }
     ] }
   ];
   openBranches = new Set<string>(JSON.parse(localStorage.getItem('pms_menu_open') || '[]'));
@@ -265,6 +269,7 @@ export class AppComponent implements OnInit, OnDestroy {
       users: ['user.manage'],
       audit: ['report.finance'],
       roadmap: ['user.manage'],
+      'ai-knowledge': ['user.manage'],
       manageRooms: ['room.configure', 'room.maintain'],
       buildings: ['room.configure'],
       properties: ['chain.property']

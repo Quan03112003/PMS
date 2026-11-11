@@ -23,3 +23,17 @@ services:
         value: HotelPms.Api
       - key: Jwt__Audience
         value: HotelPms.Angular
+      - key: AI__Provider
+        value: local
+      - key: AI__ModelPath
+        value: ""
+      - key: AI__EmbeddingModel
+        value: ""
+      - key: AI__MaxTokens
+        value: "160"
+      - key: AI__Temperature
+        value: "0.1"
+      - key: AI__ServiceUrl
+        value: ""
+      - key: AI__ServiceKey
+        value: ""

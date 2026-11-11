@@ -1,0 +1,2 @@
+dataset_code,module,intent,question,question_variations,question_type,difficulty,expected_answer,expected_keywords,evaluation_criteria,answerable,source_document_ids,source_version
+default,OTHER,HOW_TO,Ví dụ câu hỏi cần người nghiệp vụ viết lại,,"PROCEDURE",MEDIUM,Đáp án này chỉ là mẫu. Import sẽ lưu DRAFT và không được duyệt tự động.,từ khóa mẫu,Đủ ý và có nguồn,ANSWERABLE,,1

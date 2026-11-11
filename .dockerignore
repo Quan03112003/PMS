@@ -3,3 +3,9 @@
 **/obj
 frontend/node_modules
 frontend/dist
+models/
+*.gguf
+AIservice/.venv/
+AIservice/data/
+**/__pycache__/
+*.pyc

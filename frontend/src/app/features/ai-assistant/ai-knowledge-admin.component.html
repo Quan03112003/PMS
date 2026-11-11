@@ -1,0 +1,51 @@
+<section class="panel">
+  <div class="panel-head"><div><h2>Kho tri thức AI</h2><p>Tài liệu mới ở trạng thái nháp. Trợ lý chỉ đọc bản đã duyệt.</p></div></div>
+  @if (notice) { <p>{{ notice }}</p> }
+  <div class="ai-admin-grid">
+    <label>Tiêu đề<input [(ngModel)]="title"></label>
+    <label>Phân hệ<input [(ngModel)]="module" placeholder="BOOKING"></label>
+    <label>Tệp TXT, MD, CSV, DOCX<input type="file" (change)="upload($event)"></label>
+  </div>
+  <table>
+    <thead><tr><th>Mã</th><th>Tiêu đề</th><th>Phân hệ</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>
+      @for (doc of docs; track doc.id) {
+        <tr>
+          <td>{{ doc.code }}</td><td>{{ doc.title }}</td><td>{{ doc.module }}</td><td>{{ doc.status }}</td>
+          <td>
+            <button type="button" (click)="act(doc.id, 'approve')">Duyệt</button>
+            <button type="button" (click)="act(doc.id, 'reject')">Từ chối</button>
+            <button type="button" (click)="act(doc.id, 'reindex')">Lập lại chỉ mục</button>
+            <button type="button" (click)="remove(doc.id)">Xóa</button>
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+</section>
+<section class="panel">
+  <div class="panel-head"><div><h2>Bộ câu hỏi chuẩn</h2><p>Mẫu mới luôn là nháp. Chỉ mẫu đã duyệt được đem chấm.</p></div></div>
+  <div class="ai-admin-grid">
+    <label>Câu hỏi<textarea [(ngModel)]="question.question" rows="2"></textarea></label>
+    <label>Đáp án chuẩn<textarea [(ngModel)]="question.expectedAnswer" rows="2"></textarea></label>
+    <label>Từ khóa<textarea [(ngModel)]="question.expectedKeywords" rows="2" placeholder="cách nhau bởi dấu phẩy"></textarea></label>
+    <button type="button" (click)="saveGolden()">Lưu nháp</button>
+    <label>Nhập CSV<input type="file" accept=".csv" (change)="importCsv($event)"></label>
+    <button type="button" (click)="exportCsv()">Xuất CSV</button>
+    <button type="button" (click)="run()">Chạy đánh giá truy xuất</button>
+  </div>
+  <table>
+    <thead><tr><th>Câu hỏi</th><th>Phân hệ</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>
+      @for (row of golden; track row.id) {
+        <tr>
+          <td>{{ row.question }}</td><td>{{ row.module }}</td><td>{{ row.approvalStatus }}</td>
+          <td>@if (row.approvalStatus !== 'APPROVED') { <button type="button" (click)="approveGolden(row.id)">Duyệt</button> }</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+  @if (runs.length) {
+    <p>Lần chấm gần nhất: {{ runs[0].passed }} đạt, {{ runs[0].failed }} chưa đạt, kiểu tìm {{ runs[0].retrievalMode }}.</p>
+  }
+</section>

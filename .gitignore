@@ -9,3 +9,9 @@ obj/
 backend/HotelPms.Api/appsettings.Development.json
 appsettings.Production.json
 *.log
+models/
+*.gguf
+AIservice/.venv/
+AIservice/data/
+**/__pycache__/
+*.pyc

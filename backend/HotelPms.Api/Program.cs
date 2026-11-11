@@ -24,6 +24,13 @@ builder.Services.AddDbContext<PmsDbContext>(options => {
         throw new InvalidOperationException($"Unsupported Database:Provider '{databaseProvider}'");
 });
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+builder.Services.AddHttpClient<IAiRuntime, PythonAiRuntime>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<IEmbeddingService, DisabledEmbeddingService>();
+builder.Services.AddScoped<IKnowledgeSearchService, LexicalKnowledgeSearch>();
+builder.Services.AddScoped<IKnowledgeIngestionService, KnowledgeIngestionService>();
+builder.Services.AddScoped<IAIChatService, AiChatService>();
+builder.Services.AddScoped<IGoldenDatasetService, GoldenDatasetService>();
+builder.Services.AddScoped<IAIEvaluationService, AiEvaluationService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 var key = builder.Configuration["Jwt:Secret"] ?? throw new InvalidOperationException("Missing Jwt:Secret");
@@ -95,6 +102,7 @@ app.MapPost("/api/auth/login", async (LoginRequest req, PmsDbContext db, IPasswo
 
 var api = app.MapGroup("/api").RequireAuthorization();
 api.AddEndpointFilter(Ops.DepartmentAccess);
+AiEndpoints.Map(api);
 api.MapGet("/properties", async (ClaimsPrincipal user, PmsDbContext db) => {
     var scope = Ops.UserProperty(user);
     var query = db.Properties.AsNoTracking().Where(p => p.IsActive);

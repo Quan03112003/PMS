@@ -63,6 +63,15 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
     public DbSet<ReservationHold> ReservationHolds => Set<ReservationHold>();
     public DbSet<NightAuditLine> NightAuditLines => Set<NightAuditLine>();
     public DbSet<NotificationDispatch> NotificationDispatches => Set<NotificationDispatch>();
+    public DbSet<AiKnowledgeDocument> AiKnowledgeDocuments => Set<AiKnowledgeDocument>();
+    public DbSet<AiKnowledgeChunk> AiKnowledgeChunks => Set<AiKnowledgeChunk>();
+    public DbSet<AiConversation> AiConversations => Set<AiConversation>();
+    public DbSet<AiMessage> AiMessages => Set<AiMessage>();
+    public DbSet<AiAnswerFeedback> AiAnswerFeedback => Set<AiAnswerFeedback>();
+    public DbSet<AiGoldenQuestion> AiGoldenQuestions => Set<AiGoldenQuestion>();
+    public DbSet<AiEvaluationRun> AiEvaluationRuns => Set<AiEvaluationRun>();
+    public DbSet<AiEvaluationResult> AiEvaluationResults => Set<AiEvaluationResult>();
+    public DbSet<AiIngestionJob> AiIngestionJobs => Set<AiIngestionJob>();
     public DbSet<PaymentRefund> PaymentRefunds => Set<PaymentRefund>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -242,6 +251,25 @@ public sealed class PmsDbContext(DbContextOptions<PmsDbContext> options) : DbCon
         b.Entity<GroupMasterFolio>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
         b.Entity<GroupMasterLine>().ToTable("group_master_lines").HasOne<GroupMasterFolio>().WithMany().HasForeignKey(x => x.FolioId).OnDelete(DeleteBehavior.Cascade);
         b.Entity<GroupMasterPayment>().ToTable("group_master_payments").HasOne<GroupMasterFolio>().WithMany().HasForeignKey(x => x.FolioId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<AiKnowledgeDocument>().ToTable("ai_knowledge_documents").HasIndex(x => new { x.PropertyId, x.Status });
+        b.Entity<AiKnowledgeDocument>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiKnowledgeDocument>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiKnowledgeDocument>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiKnowledgeChunk>().ToTable("ai_knowledge_chunks").HasIndex(x => new { x.DocumentId, x.Ordinal }).IsUnique();
+        b.Entity<AiKnowledgeChunk>().HasOne<AiKnowledgeDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<AiConversation>().ToTable("ai_conversations").HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+        b.Entity<AiConversation>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiConversation>().HasOne<Property>().WithMany().HasForeignKey(x => x.PropertyId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiMessage>().ToTable("ai_messages").HasIndex(x => new { x.ConversationId, x.CreatedAtUtc });
+        b.Entity<AiMessage>().HasOne<AiConversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<AiAnswerFeedback>().ToTable("ai_answer_feedback").HasOne<AiMessage>().WithMany().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<AiAnswerFeedback>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiGoldenQuestion>().ToTable("ai_golden_questions").HasIndex(x => x.ApprovalStatus);
+        b.Entity<AiGoldenQuestion>().HasOne<AppUser>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiEvaluationRun>().ToTable("ai_evaluation_runs");
+        b.Entity<AiEvaluationResult>().ToTable("ai_evaluation_results").HasOne<AiEvaluationRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+        b.Entity<AiEvaluationResult>().HasOne<AiGoldenQuestion>().WithMany().HasForeignKey(x => x.QuestionId).OnDelete(DeleteBehavior.Restrict);
+        b.Entity<AiIngestionJob>().ToTable("ai_ingestion_jobs").HasOne<AiKnowledgeDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
         if (isNpgsql) {
             b.Entity<Reservation>().Property(x => x.RatePlanSnapshot).HasColumnType("jsonb");
             b.Entity<EInvoice>().Property(x => x.RequestPayload).HasColumnType("jsonb");

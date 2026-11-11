@@ -74,7 +74,7 @@
       <ng-container *ngTemplateOutlet="navTree; context: { $implicit: menuTree, depth: 0 }"></ng-container>
       @if (menuSearch && !anyMenuMatch) {<div class="nav-empty">Không có chức năng phù hợp</div>}
     </nav>
-    <div class="sidebar-foot"><div class="support-icon">?</div><div><b>Trợ giúp vận hành</b><small>Lộ trình yêu cầu · Demo</small></div></div>
+    <button type="button" class="sidebar-foot" (click)="aiOpen = true"><div class="support-icon">?</div><div><b>Trợ giúp vận hành</b><small>Mở trợ lý AI</small></div></button>
   </aside>
   <div class="main-shell">
     <header class="topbar">
@@ -378,6 +378,7 @@
       @if (advancedViews.includes(view)) {<app-pms-advanced [view]="view" [propertyId]="propertyId" [user]="user" [properties]="properties"></app-pms-advanced>}
       @if (view === 'ota') {<app-ota [propertyId]="propertyId"></app-ota>}
       @if (view === 'roadmap') { @defer { <app-roadmap></app-roadmap> } @loading { <p class="muted">Đang tải lộ trình yêu cầu…</p> } }
+      @if (view === 'ai-knowledge') { <app-ai-knowledge-admin [propertyId]="propertyId"></app-ai-knowledge-admin> }
       @if (view === 'audit') {
         <div class="page-heading"><div><div class="eyebrow">MANAGEMENT / AUDIT</div><h1>Nhật ký hệ thống</h1><p>Truy vết thao tác quan trọng để phục vụ kiểm thử QC</p></div></div>
         <section class="panel padded"><div class="toolbar"><label>Từ ngày <input type="date" [(ngModel)]="listFrom"></label><label>Đến ngày <input type="date" [(ngModel)]="listTo"></label><button class="btn btn-outline" (click)="applyRange()">Lọc</button>@if (listFrom || listTo) {<button class="btn btn-outline" (click)="clearRange()">Bỏ lọc</button>}<span class="muted">Thao tác ghi trong khoảng</span></div></section>
@@ -466,5 +467,8 @@
       @if (modal === 'transfer') {<div class="field"><label>Phòng mới</label><select [(ngModel)]="form.newRoomId"><option [ngValue]="undefined">Chọn phòng đang sẵn sàng</option>@for (r of rooms; track r.id) { @if (!r.current && !r.isOutOfOrder && r.housekeepingStatus === 'INSPECTED') {<option [ngValue]="r.id">{{ r.number }} · {{ r.roomTypeName }}</option>} }</select></div><div class="field"><label>Lý do</label><select [(ngModel)]="form.reasonCode"><option value="GUEST_REQUEST">Khách yêu cầu</option><option value="UPGRADE">Nâng hạng</option><option value="DOWNGRADE">Hạ hạng</option><option value="MAINTENANCE">Phòng cũ phải sửa</option><option value="OPERATIONS">Điều phối</option><option value="OTHER">Lý do khác</option></select></div>@if (form.reasonCode === 'OTHER') {<div class="field"><label>Ghi chú</label><input [(ngModel)]="form.reasonNote" maxlength="200" placeholder="Bắt buộc khi chọn lý do khác"></div>}<label class="checkbox-line"><input type="checkbox" [(ngModel)]="form.keepPrice" [disabled]="!isManager"> Giữ giá đã khóa trên phiếu</label><small class="field-hint">Đêm đã ở giữ nguyên. Bỏ giữ giá thì máy chủ tính chênh lệch số đêm còn lại, chỉ quản lý được xác nhận.</small><div class="modal-actions"><button class="btn btn-outline" (click)="openFolio(folio.details.id)">Quay lại</button><button class="btn btn-primary" [disabled]="loading || !form.newRoomId || (form.reasonCode === 'OTHER' && !form.reasonNote)" (click)="transfer()">Xác nhận đổi phòng</button></div>}
     </div>
   </div></div>
+}
+@if (user) {
+  <app-ai-assistant [open]="aiOpen" [view]="view" [propertyId]="propertyId" (opened)="aiOpen = true" (closed)="aiOpen = false"></app-ai-assistant>
 }
 @if (toastMessage) {<div class="toast" [class.toast-error]="toastIsError"><span>{{ toastIsError ? '!' : '✓' }}</span><p>{{ toastMessage }}</p><button (click)="toastMessage = ''">✕</button></div>}

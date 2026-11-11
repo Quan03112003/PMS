@@ -71,6 +71,7 @@ public static class StaffAccess
     public static bool Allows(string method, string path, ClaimsPrincipal user, Access access)
     {
         var keys = access.Keys;
+        if (path.StartsWith("/api/ai", StringComparison.Ordinal)) return true;
         if (method == "POST" && Regex.IsMatch(path, @"^/api/stays/\d+/services$"))
             return keys.Contains("folio.service") || keys.Contains("stay.front") || keys.Contains("property.operate") || keys.Contains("folio.minibar");
         var needed = RequiredKey(method, path);

@@ -1,0 +1,48 @@
+<button type="button" class="ai-fab" (click)="opened.emit()" [attr.aria-expanded]="open" title="Hỏi đáp">Hỏi</button>
+@if (open) {
+  <section class="ai-panel" role="dialog" aria-label="Lotus AI Assistant">
+    <header>
+      <span class="ai-avatar" aria-hidden="true">AI</span>
+      <div><b>Lotus AI Assistant</b><small>AIservice Python, số lấy từ màn hình</small></div>
+      <button type="button" (click)="toggleHistory()">Lịch sử</button>
+      <button type="button" (click)="closed.emit()" aria-label="Đóng">✕</button>
+    </header>
+    @if (history.length) {
+      <div class="ai-history">
+        @for (item of history; track item.id) {
+          <button type="button" (click)="openHistory(item.id)">{{ item.module }}</button>
+        }
+      </div>
+    }
+    <div class="ai-log">
+      @for (turn of turns; track $index) {
+        <article [class.mine]="turn.role === 'user'">
+          <p>{{ turn.content }}</p>
+          @if (turn.role === 'assistant') {
+            <div class="ai-tools">
+              <button type="button" (click)="copy(turn.content)">Sao chép</button>
+              <button type="button" (click)="rate(turn, true)">Hữu ích</button>
+              <button type="button" (click)="rate(turn, false)">Chưa hữu ích</button>
+            </div>
+            @if (turn.citations?.length) {
+              <ul>
+                @for (cite of turn.citations; track cite.documentId) {
+                  <li><b>{{ cite.title }}</b> @if (cite.section) { · {{ cite.section }} }</li>
+                }
+              </ul>
+            }
+          }
+        </article>
+      }
+      @if (busy) { <p class="ai-wait">Đang lấy số liệu trên phần mềm…</p> }
+      @if (error) { <p class="ai-error">{{ error }} <button type="button" (click)="retry()">Thử lại</button></p> }
+    </div>
+    <div class="ai-suggestions">
+      @for (item of suggestions; track item) { <button type="button" (click)="send(item)">{{ item }}</button> }
+    </div>
+    <form (ngSubmit)="send()">
+      <textarea [(ngModel)]="draft" name="question" rows="3" placeholder="Hỏi cách dùng Lotus…" (keydown)="onKey($event)"></textarea>
+      <button type="submit" [disabled]="busy || !draft.trim()">Gửi</button>
+    </form>
+  </section>
+}

@@ -1,0 +1,6 @@
+.ai-admin-grid { display: grid; gap: 10px; margin-bottom: 12px; }
+.ai-admin-grid label { display: grid; gap: 4px; font-size: 13px; }
+.ai-admin-grid input, .ai-admin-grid textarea { border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.ai-admin-grid button, table button { border: 1px solid var(--line); background: white; border-radius: 6px; padding: 6px 8px; }
+table { width: 100%; border-collapse: collapse; }
+td, th { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
